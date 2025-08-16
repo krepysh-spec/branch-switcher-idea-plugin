@@ -64,8 +64,10 @@ class MyToolWindowFactory : ToolWindowFactory {
             toolbarGroup.add(EditHostToolbarAction())
             toolbarGroup.add(DuplicateHostToolbarAction())
             toolbarGroup.add(DeleteHostToolbarAction())
+            toolbarGroup.addSeparator()
             toolbarGroup.add(TestConnectionToolbarAction())
             toolbarGroup.add(RefreshToolbarAction())
+            toolbarGroup.addSeparator()
             toolbarGroup.add(OpenSshToolbarAction())
             toolbarGroup.add(OpenDeploymentToolbarAction())
             val toolbar = ActionManager.getInstance().createActionToolbar("BranchSwitcherList", toolbarGroup, true)
@@ -579,14 +581,27 @@ class MyToolWindowFactory : ToolWindowFactory {
                 try {
                     val selectedProject = projectCombo.selectedItem as String
                     val hostValue = hostField.text.trim()
+                    val identityFile = identityField.text.trim()
                     
                     if (hostValue.isEmpty()) {
                         JOptionPane.showMessageDialog(dialog, "Host is required", "Error", JOptionPane.ERROR_MESSAGE)
                         return@addActionListener
                     }
                     
+                    // Check host uniqueness
+                    if (existingHost?.name != hostValue && isHostExists(hostValue)) {
+                        JOptionPane.showMessageDialog(dialog, "Host '$hostValue' already exists", "Error", JOptionPane.ERROR_MESSAGE)
+                        return@addActionListener
+                    }
+                    
+                    // Validate identity file
+                    if (identityFile.isNotEmpty() && !isValidIdentityFile(identityFile)) {
+                        JOptionPane.showMessageDialog(dialog, "Invalid identity file: $identityFile", "Error", JOptionPane.ERROR_MESSAGE)
+                        return@addActionListener
+                    }
+                    
                     saveHost(existingHost?.name, hostValue, hostValue, 
-                           userField.text.trim(), portField.text.trim(), identityField.text.trim(), selectedProject)
+                           userField.text.trim(), portField.text.trim(), identityFile, selectedProject)
                     dialog.dispose()
                     refreshHosts()
                 } catch (e: Exception) {
@@ -706,6 +721,30 @@ class MyToolWindowFactory : ToolWindowFactory {
                     }
                 }
             }.start()
+        }
+        
+        private fun isHostExists(hostName: String): Boolean {
+            val hosts = parser.parseConfig()
+            return hosts.any { it.name == hostName }
+        }
+        
+        private fun isValidIdentityFile(filePath: String): Boolean {
+            val expandedPath = if (filePath.startsWith("~/")) {
+                System.getProperty("user.home") + filePath.substring(1)
+            } else {
+                filePath
+            }
+            
+            val file = java.io.File(expandedPath)
+            if (!file.exists() || !file.isFile) return false
+            
+            // Basic validation for SSH private key format
+            try {
+                val content = file.readText()
+                return content.contains("BEGIN") && content.contains("PRIVATE KEY") && content.contains("END")
+            } catch (e: Exception) {
+                return false
+            }
         }
         
         private fun duplicateHost(host: SshHost) {

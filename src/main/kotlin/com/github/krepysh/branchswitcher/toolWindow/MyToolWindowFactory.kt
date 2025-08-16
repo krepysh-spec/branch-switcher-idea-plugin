@@ -56,6 +56,7 @@ class MyToolWindowFactory : ToolWindowFactory {
             
             val toolbarGroup = DefaultActionGroup()
             toolbarGroup.add(AddHostToolbarAction())
+            toolbarGroup.add(EditHostToolbarAction())
             toolbarGroup.add(DuplicateHostToolbarAction())
             toolbarGroup.add(DeleteHostToolbarAction())
             toolbarGroup.add(RefreshToolbarAction())
@@ -203,6 +204,19 @@ class MyToolWindowFactory : ToolWindowFactory {
                     createSshConfig()
                 }
                 showAddHostDialog()
+            }
+        }
+        
+        inner class EditHostToolbarAction : AnAction("Edit", "Edit selected SSH host", AllIcons.Actions.Edit) {
+            override fun actionPerformed(e: AnActionEvent) {
+                val selected = hostList.selectedValue
+                if (selected is HostItem) {
+                    showEditHostDialog(selected.host)
+                }
+            }
+            
+            override fun update(e: AnActionEvent) {
+                e.presentation.isEnabled = hostList.selectedValue is HostItem
             }
         }
         
@@ -382,10 +396,11 @@ class MyToolWindowFactory : ToolWindowFactory {
                 }
             }
             
-            val nameField = JTextField(existingHost?.name ?: "", 20)
-            val hostnameField = JTextField(existingHost?.hostname ?: "", 20)
-            val userField = JTextField(existingHost?.user ?: "", 20)
-            val portField = JTextField(existingHost?.port?.toString() ?: "", 20)
+            val hostField = JTextField(existingHost?.name ?: "", 20)
+            val userField = JTextField("dev", 20)
+            userField.isEnabled = false
+            val portField = JTextField(existingHost?.port?.toString() ?: "22", 20)
+            portField.isEnabled = false
             
             val defaultIdentityPath = java.io.File(System.getProperty("user.home"), ".ssh/id_rsa")
             val identityField = JTextField(
@@ -403,8 +418,7 @@ class MyToolWindowFactory : ToolWindowFactory {
             
             val fields = listOf(
                 "Project:" to projectCombo,
-                "Host Name:" to nameField,
-                "Hostname:" to hostnameField,
+                "Host:" to hostField,
                 "User:" to userField,
                 "Port:" to portField
             )
@@ -431,20 +445,14 @@ class MyToolWindowFactory : ToolWindowFactory {
             saveButton.addActionListener {
                 try {
                     val selectedProject = projectCombo.selectedItem as String
-                    val hostName = nameField.text.trim()
-                    val hostname = hostnameField.text.trim()
+                    val hostValue = hostField.text.trim()
                     
-                    if (hostName.isEmpty()) {
-                        JOptionPane.showMessageDialog(dialog, "Host name is required", "Error", JOptionPane.ERROR_MESSAGE)
+                    if (hostValue.isEmpty()) {
+                        JOptionPane.showMessageDialog(dialog, "Host is required", "Error", JOptionPane.ERROR_MESSAGE)
                         return@addActionListener
                     }
                     
-                    if (hostname.isEmpty()) {
-                        JOptionPane.showMessageDialog(dialog, "Hostname is required", "Error", JOptionPane.ERROR_MESSAGE)
-                        return@addActionListener
-                    }
-                    
-                    saveHost(existingHost?.name, hostName, hostname, 
+                    saveHost(existingHost?.name, hostValue, hostValue, 
                            userField.text.trim(), portField.text.trim(), identityField.text.trim(), selectedProject)
                     dialog.dispose()
                     refreshHosts()
@@ -520,7 +528,8 @@ class MyToolWindowFactory : ToolWindowFactory {
         
         private fun duplicateHost(host: SshHost) {
             val newName = "${host.name}_copy"
-            saveHost(null, newName, host.hostname ?: "", host.user ?: "", host.port?.toString() ?: "", host.identityFile ?: "", "Unknown")
+            val originalProject = getProjectForHost(host.name) ?: "Unknown"
+            saveHost(null, newName, host.hostname ?: "", host.user ?: "", host.port?.toString() ?: "", host.identityFile ?: "", originalProject)
             refreshHosts()
         }
     }
@@ -537,7 +546,6 @@ class MyToolWindowFactory : ToolWindowFactory {
                     text = value.name
                     font = font.deriveFont(Font.BOLD)
                     border = BorderFactory.createEmptyBorder(4, 4, 4, 4)
-                    background = if (isSelected) list?.selectionBackground else list?.background?.darker()
                 }
                 is HostItem -> {
                     icon = AllIcons.Nodes.DataTables

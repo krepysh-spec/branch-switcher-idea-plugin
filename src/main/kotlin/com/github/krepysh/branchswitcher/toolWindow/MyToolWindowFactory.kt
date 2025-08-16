@@ -1,8 +1,11 @@
 package com.github.krepysh.branchswitcher.toolWindow
 
 import com.intellij.icons.AllIcons
+import com.intellij.notification.NotificationGroupManager
+import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.*
 import com.intellij.openapi.project.Project
+import com.intellij.openapi.project.ProjectManager
 import com.intellij.openapi.wm.ToolWindow
 import com.intellij.openapi.wm.ToolWindowFactory
 import com.intellij.ui.components.JBList
@@ -13,9 +16,11 @@ import com.github.krepysh.branchswitcher.model.SshHost
 import java.awt.*
 import javax.swing.*
 
+enum class ConnectionStatus { UNKNOWN, TESTING, SUCCESS, FAILED }
+
 sealed class ListItem
 data class ProjectHeader(val name: String, var isExpanded: Boolean = true) : ListItem()
-data class HostItem(val host: SshHost, val project: String?) : ListItem()
+data class HostItem(val host: SshHost, val project: String?, var connectionStatus: ConnectionStatus = ConnectionStatus.UNKNOWN) : ListItem()
 
 class MyToolWindowFactory : ToolWindowFactory {
 
@@ -59,6 +64,7 @@ class MyToolWindowFactory : ToolWindowFactory {
             toolbarGroup.add(EditHostToolbarAction())
             toolbarGroup.add(DuplicateHostToolbarAction())
             toolbarGroup.add(DeleteHostToolbarAction())
+            toolbarGroup.add(TestConnectionToolbarAction())
             toolbarGroup.add(RefreshToolbarAction())
             toolbarGroup.add(OpenSshToolbarAction())
             toolbarGroup.add(OpenDeploymentToolbarAction())
@@ -68,6 +74,7 @@ class MyToolWindowFactory : ToolWindowFactory {
             val popup = JPopupMenu()
             val editItem = JMenuItem("Edit", AllIcons.Actions.Edit)
             val deleteItem = JMenuItem("Delete", AllIcons.Actions.Cancel)
+            val testItem = JMenuItem("Test Connection", AllIcons.Actions.Execute)
             
             editItem.addActionListener { 
                 val selected = hostList.selectedValue
@@ -83,9 +90,16 @@ class MyToolWindowFactory : ToolWindowFactory {
                     deleteHost(selected.host)
                 }
             }
+            testItem.addActionListener {
+                val selected = hostList.selectedValue
+                if (selected is HostItem) {
+                    testConnectionWithStatus(selected)
+                }
+            }
             
             popup.add(editItem)
             popup.add(deleteItem)
+            popup.add(testItem)
             
             // Add mouse listener for right-click and project header clicks
             hostList.addMouseListener(object : java.awt.event.MouseAdapter() {
@@ -248,6 +262,19 @@ class MyToolWindowFactory : ToolWindowFactory {
             }
         }
         
+        inner class TestConnectionToolbarAction : AnAction("Test Connection", "Test SSH connection", AllIcons.Actions.Execute) {
+            override fun actionPerformed(e: AnActionEvent) {
+                val selected = hostList.selectedValue
+                if (selected is HostItem) {
+                    testConnectionWithStatus(selected)
+                }
+            }
+            
+            override fun update(e: AnActionEvent) {
+                e.presentation.isEnabled = hostList.selectedValue is HostItem
+            }
+        }
+        
         inner class RefreshToolbarAction : AnAction("Refresh", "Refresh SSH hosts", AllIcons.Actions.Refresh) {
             override fun actionPerformed(e: AnActionEvent) {
                 refreshHosts()
@@ -267,7 +294,7 @@ class MyToolWindowFactory : ToolWindowFactory {
             override fun actionPerformed(e: AnActionEvent) {
                 val project = e.project ?: return
                 com.intellij.openapi.options.ShowSettingsUtil.getInstance().showSettingsDialog(
-                    project, "Open Deployment"
+                    project, "Deployment"
                 )
             }
         }
@@ -633,6 +660,54 @@ class MyToolWindowFactory : ToolWindowFactory {
             configFile.writeText(lines.joinToString("\n"))
         }
         
+        private fun testConnectionWithStatus(hostItem: HostItem) {
+            hostItem.connectionStatus = ConnectionStatus.TESTING
+            hostList.repaint()
+            
+            Thread {
+                try {
+                    val process = ProcessBuilder(
+                        "ssh", "-o", "ConnectTimeout=10", "-o", "BatchMode=yes", 
+                        hostItem.host.name, "echo", "Connection successful"
+                    ).start()
+                    
+                    val success = process.waitFor() == 0
+                    
+                    SwingUtilities.invokeLater {
+                        hostItem.connectionStatus = if (success) ConnectionStatus.SUCCESS else ConnectionStatus.FAILED
+                        hostList.repaint()
+                        
+                        val project = ProjectManager.getInstance().defaultProject
+                        val notificationGroup = NotificationGroupManager.getInstance().getNotificationGroup("SSH Connection")
+                        
+                        if (success) {
+                            notificationGroup.createNotification(
+                                "Connection successful to ${hostItem.host.name}",
+                                NotificationType.INFORMATION
+                            ).notify(project)
+                        } else {
+                            notificationGroup.createNotification(
+                                "Connection failed to ${hostItem.host.name}",
+                                NotificationType.ERROR
+                            ).notify(project)
+                        }
+                    }
+                } catch (e: Exception) {
+                    SwingUtilities.invokeLater {
+                        hostItem.connectionStatus = ConnectionStatus.FAILED
+                        hostList.repaint()
+                        
+                        val project = ProjectManager.getInstance().defaultProject
+                        val notificationGroup = NotificationGroupManager.getInstance().getNotificationGroup("SSH Connection")
+                        notificationGroup.createNotification(
+                            "Connection error to ${hostItem.host.name}: ${e.message}",
+                            NotificationType.ERROR
+                        ).notify(project)
+                    }
+                }
+            }.start()
+        }
+        
         private fun duplicateHost(host: SshHost) {
             val newName = "${host.name}_copy"
             val originalProject = getProjectForHost(host.name) ?: "Unknown"
@@ -655,7 +730,12 @@ class MyToolWindowFactory : ToolWindowFactory {
                     border = BorderFactory.createEmptyBorder(4, 4, 4, 4)
                 }
                 is HostItem -> {
-                    icon = AllIcons.Nodes.DataTables
+                    icon = when (value.connectionStatus) {
+                        ConnectionStatus.UNKNOWN -> AllIcons.General.Web
+                        ConnectionStatus.TESTING -> AllIcons.Process.Step_1
+                        ConnectionStatus.SUCCESS -> AllIcons.General.InspectionsOK
+                        ConnectionStatus.FAILED -> AllIcons.General.Error
+                    }
                     text = buildString {
                         append(value.host.name)
                         value.host.hostname?.let { append(" ($it)") }

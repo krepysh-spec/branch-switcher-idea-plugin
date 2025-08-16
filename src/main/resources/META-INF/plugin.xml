@@ -1,16 +1,13 @@
-<!-- Plugin Configuration File. Read more: https://plugins.jetbrains.com/docs/intellij/plugin-configuration-file.html -->
 <idea-plugin>
     <id>com.github.krepysh.branchswitcher</id>
     <name>Branch Switcher</name>
     <vendor>krepysh</vendor>
-    <description>Branch Switcher plugin that scans SSH config and displays host information</description>
+    <description>SSH config manager with ProxyJump support</description>
 
     <depends>com.intellij.modules.platform</depends>
 
-    <resource-bundle>messages.MyBundle</resource-bundle>
-
     <extensions defaultExtensionNs="com.intellij">
         <toolWindow factoryClass="com.github.krepysh.branchswitcher.toolWindow.MyToolWindowFactory" id="BranchSwitcher"/>
-        <postStartupActivity implementation="com.github.krepysh.branchswitcher.startup.MyProjectActivity" />
+        <notificationGroup id="SSH Connection" displayType="BALLOON"/>
     </extensions>
 </idea-plugin>

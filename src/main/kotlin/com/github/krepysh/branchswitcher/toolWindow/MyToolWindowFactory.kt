@@ -203,7 +203,9 @@ class MyToolWindowFactory : ToolWindowFactory {
                 if (!configFile.exists()) {
                     createSshConfig()
                 }
-                showAddHostDialog()
+                if (checkAndInitializeGateway()) {
+                    showAddHostDialog()
+                }
             }
         }
         
@@ -288,6 +290,110 @@ class MyToolWindowFactory : ToolWindowFactory {
             }
         }
         
+        private fun checkAndInitializeGateway(): Boolean {
+            if (!parser.hasGatewayHost()) {
+                return showGatewayInitializationDialog()
+            }
+            return true
+        }
+        
+        private fun showGatewayInitializationDialog(): Boolean {
+            val result = JOptionPane.showConfirmDialog(
+                null,
+                "ProxyJump host 'gatesftp2' not found.\nIt needs to be initialized before starting work.\nInitialize now?",
+                "Initialize ProxyJump",
+                JOptionPane.YES_NO_OPTION,
+                JOptionPane.QUESTION_MESSAGE
+            )
+            
+            return if (result == JOptionPane.YES_OPTION) {
+                showGatewaySetupDialog()
+            } else {
+                false
+            }
+        }
+        
+        private fun showGatewaySetupDialog(): Boolean {
+            var result = false
+            val dialog = JDialog()
+            dialog.title = "Setup ProxyJump Host"
+            dialog.isModal = true
+            dialog.layout = GridBagLayout()
+            
+            val gbc = GridBagConstraints()
+            gbc.insets = Insets(5, 5, 5, 5)
+            gbc.anchor = GridBagConstraints.WEST
+            
+            val defaultIdentityPath = java.io.File(System.getProperty("user.home"), ".ssh/id_rsa")
+            val identityField = JTextField(
+                if (defaultIdentityPath.exists()) defaultIdentityPath.absolutePath else "~/.ssh/id_rsa", 
+                30
+            )
+            val browseButton = JButton("Browse")
+            browseButton.addActionListener {
+                val fileChooser = JFileChooser(java.io.File(System.getProperty("user.home"), ".ssh"))
+                fileChooser.dialogTitle = "Select Identity File"
+                if (fileChooser.showOpenDialog(dialog) == JFileChooser.APPROVE_OPTION) {
+                    identityField.text = fileChooser.selectedFile.absolutePath
+                }
+            }
+            
+            gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 3
+            dialog.add(JLabel("Setup ProxyJump host 'gatesftp2':"), gbc)
+            
+            gbc.gridy = 1; gbc.gridwidth = 1
+            dialog.add(JLabel("HostName:"), gbc)
+            gbc.gridx = 1; gbc.gridwidth = 2
+            dialog.add(JLabel("23.109.14.108"), gbc)
+            
+            gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 1
+            dialog.add(JLabel("User:"), gbc)
+            gbc.gridx = 1; gbc.gridwidth = 2
+            dialog.add(JLabel("gateway"), gbc)
+            
+            gbc.gridx = 0; gbc.gridy = 3; gbc.gridwidth = 1
+            dialog.add(JLabel("IdentityFile:"), gbc)
+            gbc.gridx = 1
+            dialog.add(identityField, gbc)
+            gbc.gridx = 2
+            dialog.add(browseButton, gbc)
+            
+            val buttonPanel = JPanel()
+            val createButton = JButton("Create")
+            val cancelButton = JButton("Cancel")
+            
+            createButton.addActionListener {
+                try {
+                    val identityFile = identityField.text.trim()
+                    if (identityFile.isEmpty()) {
+                        JOptionPane.showMessageDialog(dialog, "Identity file is required", "Error", JOptionPane.ERROR_MESSAGE)
+                        return@addActionListener
+                    }
+                    
+                    parser.addGatewayHost(identityFile)
+                    result = true
+                    dialog.dispose()
+                    JOptionPane.showMessageDialog(null, "ProxyJump host 'gatesftp2' created successfully!", "Success", JOptionPane.INFORMATION_MESSAGE)
+                } catch (e: Exception) {
+                    JOptionPane.showMessageDialog(dialog, "Error creating ProxyJump host: ${e.message}", "Error", JOptionPane.ERROR_MESSAGE)
+                }
+            }
+            
+            cancelButton.addActionListener { dialog.dispose() }
+            
+            buttonPanel.add(createButton)
+            buttonPanel.add(cancelButton)
+            
+            gbc.gridx = 0; gbc.gridy = 4; gbc.gridwidth = 3
+            dialog.add(buttonPanel, gbc)
+            
+            dialog.pack()
+            dialog.setLocationRelativeTo(null)
+            dialog.isVisible = true
+            
+            return result
+        }
+        
         private fun createSshConfig() {
             try {
                 val sshDir = java.io.File(System.getProperty("user.home"), ".ssh")
@@ -296,7 +402,7 @@ class MyToolWindowFactory : ToolWindowFactory {
                 }
                 
                 val configFile = java.io.File(sshDir, "config")
-                configFile.writeText("# SSH Config\n# Add your hosts here\n\n# Example:\n# Host example\n#     HostName example.com\n#     User username\n#     Port 22\n")
+                configFile.writeText("# SSH Config\n# Add your hosts here\n")
                 
                 refreshHosts()
             } catch (e: Exception) {
@@ -402,9 +508,9 @@ class MyToolWindowFactory : ToolWindowFactory {
             val portField = JTextField(existingHost?.port?.toString() ?: "22", 20)
             portField.isEnabled = false
             
-            val defaultIdentityPath = java.io.File(System.getProperty("user.home"), ".ssh/id_rsa")
+            val defaultIdentityFile = parser.getDefaultIdentityFile()
             val identityField = JTextField(
-                existingHost?.identityFile ?: if (defaultIdentityPath.exists()) defaultIdentityPath.absolutePath else "", 
+                existingHost?.identityFile ?: defaultIdentityFile, 
                 20
             )
             val browseButton = JButton("Browse")
@@ -518,10 +624,11 @@ class MyToolWindowFactory : ToolWindowFactory {
             lines.add("")
             lines.add("# Project: $project")
             lines.add("Host $name")
-            if (hostname.isNotEmpty()) lines.add("    HostName $hostname")
             if (user.isNotEmpty()) lines.add("    User $user")
             if (port.isNotEmpty()) lines.add("    Port $port")
             if (identityFile.isNotEmpty()) lines.add("    IdentityFile $identityFile")
+            if (hostname.isNotEmpty()) lines.add("    HostName $hostname")
+            lines.add("    ProxyJump gatesftp2")
             
             configFile.writeText(lines.joinToString("\n"))
         }

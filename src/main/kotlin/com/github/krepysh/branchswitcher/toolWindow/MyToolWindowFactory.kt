@@ -13,6 +13,10 @@ import com.github.krepysh.branchswitcher.model.SshHost
 import java.awt.*
 import javax.swing.*
 
+sealed class ListItem
+data class ProjectHeader(val name: String, var isExpanded: Boolean = true) : ListItem()
+data class HostItem(val host: SshHost, val project: String?) : ListItem()
+
 class MyToolWindowFactory : ToolWindowFactory {
 
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
@@ -37,8 +41,9 @@ class MyToolWindowFactory : ToolWindowFactory {
 
     class MyToolWindow {
         private val parser = SshConfigParser()
-        private val listModel = DefaultListModel<SshHost>()
+        private val listModel = DefaultListModel<ListItem>()
         private val hostList = JBList(listModel)
+        private val expandedProjects = mutableSetOf<String>()
         
         init {
             hostList.cellRenderer = SshHostRenderer()
@@ -64,24 +69,24 @@ class MyToolWindowFactory : ToolWindowFactory {
             val deleteItem = JMenuItem("Delete", AllIcons.Actions.Cancel)
             
             editItem.addActionListener { 
-                println("Edit clicked, selected: ${hostList.selectedValue}")
-                hostList.selectedValue?.let { 
-                    println("Showing edit dialog for: ${it.name}")
-                    showEditHostDialog(it) 
+                val selected = hostList.selectedValue
+                if (selected is HostItem) {
+                    println("Showing edit dialog for: ${selected.host.name}")
+                    showEditHostDialog(selected.host)
                 }
             }
             deleteItem.addActionListener { 
-                println("Delete clicked, selected: ${hostList.selectedValue}")
-                hostList.selectedValue?.let { 
-                    println("Deleting host: ${it.name}")
-                    deleteHost(it) 
+                val selected = hostList.selectedValue
+                if (selected is HostItem) {
+                    println("Deleting host: ${selected.host.name}")
+                    deleteHost(selected.host)
                 }
             }
             
             popup.add(editItem)
             popup.add(deleteItem)
             
-            // Add mouse listener for right-click
+            // Add mouse listener for right-click and project header clicks
             hostList.addMouseListener(object : java.awt.event.MouseAdapter() {
                 override fun mousePressed(e: java.awt.event.MouseEvent) {
                     if (e.isPopupTrigger) {
@@ -102,6 +107,18 @@ class MyToolWindowFactory : ToolWindowFactory {
                         }
                     }
                 }
+                
+                override fun mouseClicked(e: java.awt.event.MouseEvent) {
+                    if (e.clickCount == 1) {
+                        val index = hostList.locationToIndex(e.point)
+                        if (index >= 0) {
+                            val item = listModel.getElementAt(index)
+                            if (item is ProjectHeader) {
+                                toggleProjectExpansion(item)
+                            }
+                        }
+                    }
+                }
             })
             
             val scrollPane = JBScrollPane(hostList)
@@ -118,8 +135,37 @@ class MyToolWindowFactory : ToolWindowFactory {
             
             if (configFile.exists()) {
                 val hosts = parser.parseConfig()
-                hosts.forEach { listModel.addElement(it) }
+                val hostsWithProjects = hosts.map { host ->
+                    val project = getProjectForHost(host.name)
+                    HostItem(host, project)
+                }
+                
+                val grouped = hostsWithProjects.groupBy { it.project ?: "No Project" }
+                
+                // Initialize all projects as expanded if expandedProjects is empty
+                if (expandedProjects.isEmpty()) {
+                    expandedProjects.addAll(grouped.keys)
+                }
+                
+                grouped.forEach { (project, hostItems) ->
+                    val isExpanded = expandedProjects.contains(project)
+                    val header = ProjectHeader(project, isExpanded)
+                    listModel.addElement(header)
+                    
+                    if (isExpanded) {
+                        hostItems.forEach { listModel.addElement(it) }
+                    }
+                }
             }
+        }
+        
+        private fun toggleProjectExpansion(header: ProjectHeader) {
+            if (header.isExpanded) {
+                expandedProjects.remove(header.name)
+            } else {
+                expandedProjects.add(header.name)
+            }
+            refreshHosts()
         }
         
         inner class RefreshAction : AnAction("Refresh", "Refresh SSH hosts", AllIcons.Actions.Refresh) {
@@ -162,21 +208,27 @@ class MyToolWindowFactory : ToolWindowFactory {
         
         inner class DuplicateHostToolbarAction : AnAction("Duplicate", "Duplicate selected SSH host", AllIcons.Actions.Copy) {
             override fun actionPerformed(e: AnActionEvent) {
-                hostList.selectedValue?.let { duplicateHost(it) }
+                val selected = hostList.selectedValue
+                if (selected is HostItem) {
+                    duplicateHost(selected.host)
+                }
             }
             
             override fun update(e: AnActionEvent) {
-                e.presentation.isEnabled = hostList.selectedValue != null
+                e.presentation.isEnabled = hostList.selectedValue is HostItem
             }
         }
         
         inner class DeleteHostToolbarAction : AnAction("Delete", "Delete selected SSH host", AllIcons.General.Remove) {
             override fun actionPerformed(e: AnActionEvent) {
-                hostList.selectedValue?.let { deleteHost(it) }
+                val selected = hostList.selectedValue
+                if (selected is HostItem) {
+                    deleteHost(selected.host)
+                }
             }
             
             override fun update(e: AnActionEvent) {
-                e.presentation.isEnabled = hostList.selectedValue != null
+                e.presentation.isEnabled = hostList.selectedValue is HostItem
             }
         }
         
@@ -319,6 +371,17 @@ class MyToolWindowFactory : ToolWindowFactory {
             gbc.insets = Insets(5, 5, 5, 5)
             gbc.anchor = GridBagConstraints.WEST
             
+            val projects = arrayOf("Funrize", "Scarletsands", "JackpotRabbit", "Fortunewheelz", "Funzcity", "Taofortune", "Sweepshark", "Stormrush", "Nolimitcoins")
+            val projectCombo = JComboBox(projects)
+            
+            // Set current project if editing
+            if (existingHost != null) {
+                val currentProject = getProjectForHost(existingHost.name)
+                if (currentProject != null) {
+                    projectCombo.selectedItem = currentProject
+                }
+            }
+            
             val nameField = JTextField(existingHost?.name ?: "", 20)
             val hostnameField = JTextField(existingHost?.hostname ?: "", 20)
             val userField = JTextField(existingHost?.user ?: "", 20)
@@ -339,6 +402,7 @@ class MyToolWindowFactory : ToolWindowFactory {
             }
             
             val fields = listOf(
+                "Project:" to projectCombo,
                 "Host Name:" to nameField,
                 "Hostname:" to hostnameField,
                 "User:" to userField,
@@ -366,8 +430,22 @@ class MyToolWindowFactory : ToolWindowFactory {
             
             saveButton.addActionListener {
                 try {
-                    saveHost(existingHost?.name, nameField.text, hostnameField.text, 
-                           userField.text, portField.text, identityField.text)
+                    val selectedProject = projectCombo.selectedItem as String
+                    val hostName = nameField.text.trim()
+                    val hostname = hostnameField.text.trim()
+                    
+                    if (hostName.isEmpty()) {
+                        JOptionPane.showMessageDialog(dialog, "Host name is required", "Error", JOptionPane.ERROR_MESSAGE)
+                        return@addActionListener
+                    }
+                    
+                    if (hostname.isEmpty()) {
+                        JOptionPane.showMessageDialog(dialog, "Hostname is required", "Error", JOptionPane.ERROR_MESSAGE)
+                        return@addActionListener
+                    }
+                    
+                    saveHost(existingHost?.name, hostName, hostname, 
+                           userField.text.trim(), portField.text.trim(), identityField.text.trim(), selectedProject)
                     dialog.dispose()
                     refreshHosts()
                 } catch (e: Exception) {
@@ -389,22 +467,48 @@ class MyToolWindowFactory : ToolWindowFactory {
             dialog.isVisible = true
         }
         
-        private fun saveHost(oldName: String?, name: String, hostname: String, user: String, port: String, identityFile: String) {
+        private fun getProjectForHost(hostName: String): String? {
+            val configFile = java.io.File(System.getProperty("user.home"), ".ssh/config")
+            if (!configFile.exists()) return null
+            
+            val lines = configFile.readLines()
+            val hostIndex = lines.indexOfFirst { it.trim() == "Host $hostName" }
+            if (hostIndex > 0) {
+                val prevLine = lines[hostIndex - 1].trim()
+                if (prevLine.startsWith("# Project:")) {
+                    return prevLine.substringAfter("# Project:").trim()
+                }
+            }
+            return null
+        }
+        
+        private fun saveHost(oldName: String?, name: String, hostname: String, user: String, port: String, identityFile: String, project: String) {
             val configFile = java.io.File(System.getProperty("user.home"), ".ssh/config")
             val lines = if (configFile.exists()) configFile.readLines().toMutableList() else mutableListOf()
             
             if (oldName != null) {
-                val startIndex = lines.indexOfFirst { it.trim().startsWith("Host $oldName") }
-                if (startIndex >= 0) {
-                    var endIndex = startIndex + 1
+                val hostIndex = lines.indexOfFirst { it.trim() == "Host $oldName" }
+                if (hostIndex >= 0) {
+                    var startIndex = hostIndex
+                    // Check if there's a project comment before the host
+                    if (hostIndex > 0 && lines[hostIndex - 1].trim().startsWith("# Project:")) {
+                        startIndex = hostIndex - 1
+                    }
+                    
+                    var endIndex = hostIndex + 1
                     while (endIndex < lines.size && (lines[endIndex].startsWith("    ") || lines[endIndex].trim().isEmpty())) {
                         endIndex++
                     }
-                    repeat(endIndex - startIndex) { lines.removeAt(startIndex) }
+                    
+                    // Remove from startIndex to endIndex
+                    for (i in endIndex - 1 downTo startIndex) {
+                        lines.removeAt(i)
+                    }
                 }
             }
             
             lines.add("")
+            lines.add("# Project: $project")
             lines.add("Host $name")
             if (hostname.isNotEmpty()) lines.add("    HostName $hostname")
             if (user.isNotEmpty()) lines.add("    User $user")
@@ -416,7 +520,7 @@ class MyToolWindowFactory : ToolWindowFactory {
         
         private fun duplicateHost(host: SshHost) {
             val newName = "${host.name}_copy"
-            saveHost(null, newName, host.hostname ?: "", host.user ?: "", host.port?.toString() ?: "", host.identityFile ?: "")
+            saveHost(null, newName, host.hostname ?: "", host.user ?: "", host.port?.toString() ?: "", host.identityFile ?: "", "Unknown")
             refreshHosts()
         }
     }
@@ -427,14 +531,24 @@ class MyToolWindowFactory : ToolWindowFactory {
         ): Component {
             super.getListCellRendererComponent(list, value, index, isSelected, cellHasFocus)
             
-            if (value is SshHost) {
-                icon = AllIcons.Nodes.DataTables
-                text = buildString {
-                    append(value.name)
-                    value.hostname?.let { append(" ($it)") }
-                    value.user?.let { append(" - $it") }
+            when (value) {
+                is ProjectHeader -> {
+                    icon = if (value.isExpanded) AllIcons.General.ArrowDown else AllIcons.General.ArrowRight
+                    text = value.name
+                    font = font.deriveFont(Font.BOLD)
+                    border = BorderFactory.createEmptyBorder(4, 4, 4, 4)
+                    background = if (isSelected) list?.selectionBackground else list?.background?.darker()
                 }
-                border = BorderFactory.createEmptyBorder(2, 8, 2, 2)
+                is HostItem -> {
+                    icon = AllIcons.Nodes.DataTables
+                    text = buildString {
+                        append(value.host.name)
+                        value.host.hostname?.let { append(" ($it)") }
+                        value.host.user?.let { append(" - $it") }
+                    }
+                    font = font.deriveFont(Font.PLAIN)
+                    border = BorderFactory.createEmptyBorder(2, 20, 2, 2)
+                }
             }
             
             return this

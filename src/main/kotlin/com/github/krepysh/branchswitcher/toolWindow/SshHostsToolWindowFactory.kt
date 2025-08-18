@@ -489,45 +489,9 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
         }
         
         private fun removeHostFromConfig(hostName: String) {
-            val configFile = java.io.File(System.getProperty("user.home"), ".ssh/config")
-            if (!configFile.exists()) return
-            
-            val lines = configFile.readLines().toMutableList()
-            println("Looking for host: $hostName")
-            val startIndex = lines.indexOfFirst { line ->
-                val trimmed = line.trim()
-                val matches = trimmed == "Host $hostName" || trimmed.startsWith("Host $hostName ")
-                if (matches) println("Found host at line: $line")
-                matches
-            }
-            
-            println("Start index: $startIndex")
-            if (startIndex >= 0) {
-                var endIndex = startIndex + 1
-                while (endIndex < lines.size) {
-                    val line = lines[endIndex]
-                    if (line.trim().startsWith("Host ") && !line.startsWith("    ")) {
-                        break
-                    }
-                    endIndex++
-                }
-                
-                println("Removing lines from $startIndex to $endIndex")
-                // Remove the host block
-                for (i in endIndex - 1 downTo startIndex) {
-                    println("Removing line: ${lines[i]}")
-                    lines.removeAt(i)
-                }
-                
-                // Clean up empty lines
-                while (startIndex > 0 && startIndex < lines.size && lines[startIndex].trim().isEmpty()) {
-                    lines.removeAt(startIndex)
-                }
-                
-                configFile.writeText(lines.joinToString("\n"))
-                println("Host $hostName removed successfully")
-            } else {
-                println("Host $hostName not found in config")
+            val project = getProjectForHost(hostName)
+            if (project != null) {
+                sshService.removeProjectHost(project.lowercase(), hostName)
             }
         }
         
@@ -709,55 +673,33 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
         }
         
         private fun getProjectForHost(hostName: String): String? {
-            val configFile = java.io.File(System.getProperty("user.home"), ".ssh/config")
-            if (!configFile.exists()) return null
+            val confDDir = com.github.krepysh.branchswitcher.util.FileUtils.getSshConfDDir()
+            if (!confDDir.exists()) return null
             
-            val lines = configFile.readLines()
-            val hostIndex = lines.indexOfFirst { it.trim() == "Host $hostName" }
-            if (hostIndex > 0) {
-                val prevLine = lines[hostIndex - 1].trim()
-                if (prevLine.startsWith("# Project:")) {
-                    return prevLine.substringAfter("# Project:").trim()
+            confDDir.listFiles()?.filter { it.isDirectory }?.forEach { projectDir ->
+                val hostFile = java.io.File(projectDir, hostName)
+                if (hostFile.exists()) {
+                    return projectDir.name.replaceFirstChar { it.uppercase() }
                 }
             }
             return null
         }
         
         private fun saveHost(oldName: String?, name: String, hostname: String, user: String, port: String, identityFile: String, project: String) {
-            val configFile = java.io.File(System.getProperty("user.home"), ".ssh/config")
-            val lines = if (configFile.exists()) configFile.readLines().toMutableList() else mutableListOf()
-            
-            if (oldName != null) {
-                val hostIndex = lines.indexOfFirst { it.trim() == "Host $oldName" }
-                if (hostIndex >= 0) {
-                    var startIndex = hostIndex
-                    // Check if there's a project comment before the host
-                    if (hostIndex > 0 && lines[hostIndex - 1].trim().startsWith("# Project:")) {
-                        startIndex = hostIndex - 1
-                    }
-                    
-                    var endIndex = hostIndex + 1
-                    while (endIndex < lines.size && (lines[endIndex].startsWith("    ") || lines[endIndex].trim().isEmpty())) {
-                        endIndex++
-                    }
-                    
-                    // Remove from startIndex to endIndex
-                    for (i in endIndex - 1 downTo startIndex) {
-                        lines.removeAt(i)
-                    }
-                }
+            // Remove old host if editing
+            if (oldName != null && oldName != name) {
+                sshService.removeProjectHost(project, oldName)
             }
             
-            lines.add("")
-            lines.add("# Project: $project")
-            lines.add("Host $name")
-            if (user.isNotEmpty()) lines.add("    User $user")
-            if (port.isNotEmpty()) lines.add("    Port $port")
-            if (identityFile.isNotEmpty()) lines.add("    IdentityFile $identityFile")
-            if (hostname.isNotEmpty()) lines.add("    HostName $hostname")
-            lines.add("    ProxyJump gatesftp2")
-            
-            configFile.writeText(lines.joinToString("\n"))
+            // Add new host using conf.d structure
+            sshService.addProjectHost(
+                projectName = project,
+                hostName = name,
+                hostname = hostname,
+                user = user,
+                port = port.toIntOrNull(),
+                identityFile = identityFile.takeIf { it.isNotEmpty() }
+            )
         }
         
         private fun testConnectionWithStatus(hostItem: HostItem) {

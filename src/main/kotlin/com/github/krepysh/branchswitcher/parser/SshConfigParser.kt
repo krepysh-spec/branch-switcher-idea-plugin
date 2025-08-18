@@ -6,7 +6,18 @@ import com.github.krepysh.branchswitcher.util.FileUtils
 class SshConfigParser {
     
     fun parseConfig(): List<SshHost> {
-        val configFile = FileUtils.getSshConfigFile()
+        val hosts = mutableListOf<SshHost>()
+        
+        // Parse main config
+        hosts.addAll(parseConfigFile(FileUtils.getSshConfigFile()))
+        
+        // Parse conf.d files
+        hosts.addAll(parseConfDFiles())
+        
+        return hosts
+    }
+    
+    private fun parseConfigFile(configFile: java.io.File): List<SshHost> {
         if (!configFile.exists()) return emptyList()
         
         val hosts = mutableListOf<SshHost>()
@@ -15,7 +26,7 @@ class SshConfigParser {
         
         configFile.readLines().forEach { line ->
             val trimmed = line.trim()
-            if (trimmed.isEmpty() || trimmed.startsWith("#")) return@forEach
+            if (trimmed.isEmpty() || trimmed.startsWith("#") || trimmed.startsWith("Include")) return@forEach
             
             val parts = trimmed.split("\\s+".toRegex(), 2)
             if (parts.size < 2) return@forEach
@@ -42,6 +53,20 @@ class SshConfigParser {
         return hosts
     }
     
+    private fun parseConfDFiles(): List<SshHost> {
+        val confDDir = FileUtils.getSshConfDDir()
+        if (!confDDir.exists()) return emptyList()
+        
+        val hosts = mutableListOf<SshHost>()
+        
+        confDDir.listFiles()?.filter { it.isDirectory }?.forEach { projectDir ->
+            projectDir.listFiles()?.filter { it.isFile }?.forEach { hostFile ->
+                hosts.addAll(parseConfigFile(hostFile))
+            }
+        }
+        
+        return hosts
+    }
     private fun createHost(name: String, properties: Map<String, String>): SshHost {
         return SshHost(
             name = name,

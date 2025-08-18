@@ -6,4 +6,5 @@ object SshConstants {
     const val GATEWAY_USER = "gateway"
     const val DEFAULT_IDENTITY_FILE = "~/.ssh/id_rsa"
     const val SSH_CONFIG_PATH = ".ssh/config"
+    const val SSH_CONF_D_PATH = ".ssh/conf.d"
 }

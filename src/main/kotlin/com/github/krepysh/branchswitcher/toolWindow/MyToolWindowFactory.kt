@@ -590,11 +590,51 @@ class MyToolWindowFactory : ToolWindowFactory {
                 "Port:" to portField
             )
             
+            // Add test connection button next to host field
+            val testButton = JButton("Test")
+            
+            testButton.addActionListener {
+                val hostValue = hostField.text.trim()
+                if (hostValue.isNotEmpty()) {
+                    testButton.isEnabled = false
+                    testButton.text = "Testing..."
+                    
+                    Thread {
+                        val success = try {
+                            ProcessBuilder("ssh", "-o", "ConnectTimeout=10", "-o", "BatchMode=yes", 
+                                          hostValue, "echo", "Connection successful")
+                                .start().waitFor() == 0
+                        } catch (e: Exception) { false }
+                        
+                        SwingUtilities.invokeLater {
+                            testButton.isEnabled = true
+                            testButton.text = "Test"
+                            val message = if (success) "Connection successful!" else "Connection failed!"
+                            val messageType = if (success) JOptionPane.INFORMATION_MESSAGE else JOptionPane.ERROR_MESSAGE
+                            JOptionPane.showMessageDialog(contentPanel, message, "Connection Test", messageType)
+                        }
+                    }.start()
+                } else {
+                    JOptionPane.showMessageDialog(contentPanel, "Please enter a host name first", "Error", JOptionPane.ERROR_MESSAGE)
+                }
+            }
+            
+            // Update host field layout to include test button
+            val hostPanel = JPanel(FlowLayout(FlowLayout.LEFT, 0, 0))
+            hostPanel.add(hostField)
+            hostPanel.add(Box.createHorizontalStrut(5))
+            hostPanel.add(testButton)
+            
+            // Replace host field in the layout
             fields.forEachIndexed { index, (label, field) ->
                 gbc.gridx = 0; gbc.gridy = index
                 contentPanel.add(JLabel(label), gbc)
                 gbc.gridx = 1; gbc.gridwidth = 2
-                contentPanel.add(field, gbc)
+                if (field == hostField) {
+                    contentPanel.add(hostPanel, gbc)
+                } else {
+                    contentPanel.add(field, gbc)
+                }
                 gbc.gridwidth = 1
             }
             

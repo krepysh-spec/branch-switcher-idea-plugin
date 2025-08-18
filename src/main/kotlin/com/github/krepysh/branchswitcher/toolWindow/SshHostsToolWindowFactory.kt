@@ -14,6 +14,7 @@ import com.intellij.ui.components.JBScrollPane
 import com.intellij.ui.content.ContentFactory
 import com.github.krepysh.branchswitcher.parser.SshConfigParser
 import com.github.krepysh.branchswitcher.model.SshHost
+import com.github.krepysh.branchswitcher.service.SshConfigService
 import java.awt.*
 import java.io.File
 import javax.swing.*
@@ -24,19 +25,19 @@ sealed class ListItem
 data class ProjectHeader(val name: String, var isExpanded: Boolean = true) : ListItem()
 data class HostItem(val host: SshHost, val project: String?, var connectionStatus: ConnectionStatus = ConnectionStatus.UNKNOWN) : ListItem()
 
-class MyToolWindowFactory : ToolWindowFactory {
+class SshHostsToolWindowFactory : ToolWindowFactory {
 
     override fun createToolWindowContent(project: Project, toolWindow: ToolWindow) {
-        val myToolWindow = MyToolWindow()
-        val content = ContentFactory.getInstance().createContent(myToolWindow.getContent(), null, false)
+        val sshHostsToolWindow = SshHostsToolWindow()
+        val content = ContentFactory.getInstance().createContent(sshHostsToolWindow.getContent(), null, false)
         
         val actionGroup = DefaultActionGroup()
-        actionGroup.add(myToolWindow.RefreshAction())
-        actionGroup.add(myToolWindow.CreateConfigAction())
-        actionGroup.add(myToolWindow.AddHostAction())
+        actionGroup.add(sshHostsToolWindow.RefreshAction())
+        actionGroup.add(sshHostsToolWindow.CreateConfigAction())
+        actionGroup.add(sshHostsToolWindow.AddHostAction())
         actionGroup.addSeparator()
-        actionGroup.add(myToolWindow.OpenSshSettingsAction())
-        actionGroup.add(myToolWindow.OpenDeploymentSettingsAction())
+        actionGroup.add(sshHostsToolWindow.OpenSshSettingsAction())
+        actionGroup.add(sshHostsToolWindow.OpenDeploymentSettingsAction())
         
         val toolbar = ActionManager.getInstance().createActionToolbar("BranchSwitcher", actionGroup, true)
         content.setActions(actionGroup, ActionPlaces.TOOLBAR, toolbar.component)
@@ -46,14 +47,15 @@ class MyToolWindowFactory : ToolWindowFactory {
 
     override fun shouldBeAvailable(project: Project) = true
 
-    class MyToolWindow {
+    class SshHostsToolWindow {
         private val parser = SshConfigParser()
+        private val sshService = SshConfigService()
         private val listModel = DefaultListModel<ListItem>()
         private val hostList = JBList(listModel)
         private val expandedProjects = mutableSetOf<String>()
         
         init {
-            hostList.cellRenderer = SshHostRenderer()
+            hostList.cellRenderer = SshHostListRenderer()
             hostList.selectionMode = ListSelectionModel.SINGLE_SELECTION
             refreshHosts()
         }
@@ -322,7 +324,7 @@ class MyToolWindowFactory : ToolWindowFactory {
         }
         
         private fun checkAndInitializeGateway(): Boolean {
-            if (!parser.hasGatewayHost()) {
+            if (!sshService.hasGatewayHost()) {
                 return showGatewayInitializationDialog()
             }
             return true
@@ -401,7 +403,7 @@ class MyToolWindowFactory : ToolWindowFactory {
                         return@addActionListener
                     }
                     
-                    parser.addGatewayHost(identityFile)
+                    sshService.addGatewayHost(identityFile)
                     result = true
                     dialog.dispose()
                     JOptionPane.showMessageDialog(null, "ProxyJump host 'gatesftp2' created successfully!", "Success", JOptionPane.INFORMATION_MESSAGE)
@@ -567,7 +569,7 @@ class MyToolWindowFactory : ToolWindowFactory {
             val portField = JTextField(existingHost?.port?.toString() ?: "22", 20)
             portField.isEnabled = false
             
-            val defaultIdentityFile = parser.getDefaultIdentityFile()
+            val defaultIdentityFile = sshService.getDefaultIdentityFile()
             val identityField = JTextField(
                 existingHost?.identityFile ?: defaultIdentityFile, 
                 20
@@ -888,7 +890,7 @@ $newConfig
 
     }
     
-    class SshHostRenderer : DefaultListCellRenderer() {
+    class SshHostListRenderer : DefaultListCellRenderer() {
         override fun getListCellRendererComponent(
             list: JList<*>?, value: Any?, index: Int, isSelected: Boolean, cellHasFocus: Boolean
         ): Component {

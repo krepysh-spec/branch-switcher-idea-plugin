@@ -7,7 +7,7 @@
     <depends>com.intellij.modules.platform</depends>
 
     <extensions defaultExtensionNs="com.intellij">
-        <toolWindow factoryClass="com.github.krepysh.branchswitcher.toolWindow.MyToolWindowFactory" id="BranchSwitcher"/>
+        <toolWindow factoryClass="com.github.krepysh.branchswitcher.toolWindow.SshHostsToolWindowFactory" id="BranchSwitcher"/>
         <notificationGroup id="SSH Connection" displayType="BALLOON"/>
     </extensions>
 </idea-plugin>

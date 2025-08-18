@@ -1,6 +1,7 @@
 package com.github.krepysh.branchswitcher.toolWindow
 
 import com.intellij.icons.AllIcons
+
 import com.intellij.notification.NotificationGroupManager
 import com.intellij.notification.NotificationType
 import com.intellij.openapi.actionSystem.*
@@ -14,6 +15,7 @@ import com.intellij.ui.content.ContentFactory
 import com.github.krepysh.branchswitcher.parser.SshConfigParser
 import com.github.krepysh.branchswitcher.model.SshHost
 import java.awt.*
+import java.io.File
 import javax.swing.*
 
 enum class ConnectionStatus { UNKNOWN, TESTING, SUCCESS, FAILED }
@@ -440,9 +442,15 @@ class MyToolWindowFactory : ToolWindowFactory {
         }
         
         private fun deleteHost(host: SshHost) {
+            val deleteFromSshConfigsCheckbox = JCheckBox("Also delete from IntelliJ SSH configs", true)
+            val message = arrayOf(
+                "Are you sure you want to delete host '${host.name}'?",
+                deleteFromSshConfigsCheckbox
+            )
+            
             val result = JOptionPane.showConfirmDialog(
                 null,
-                "Are you sure you want to delete host '${host.name}'?",
+                message,
                 "Confirm Delete",
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.WARNING_MESSAGE
@@ -451,9 +459,29 @@ class MyToolWindowFactory : ToolWindowFactory {
             if (result == JOptionPane.YES_OPTION) {
                 try {
                     removeHostFromConfig(host.name)
+                    
+                    if (deleteFromSshConfigsCheckbox.isSelected) {
+                        removeHostFromSshConfigs(host.name)
+                    }
+                    
                     refreshHosts()
                 } catch (e: Exception) {
                     JOptionPane.showMessageDialog(null, "Error deleting host: ${e.message}", "Error", JOptionPane.ERROR_MESSAGE)
+                }
+            }
+        }
+        
+        private fun removeHostFromSshConfigs(hostName: String) {
+            val projectsDir = File(System.getProperty("user.home"), "Projects")
+            if (!projectsDir.exists()) return
+            
+            projectsDir.listFiles()?.filter { it.isDirectory }?.forEach { projectDir ->
+                val sshFile = File(projectDir, ".idea/sshConfigs.xml")
+                if (sshFile.exists()) {
+                    val content = sshFile.readText()
+                    val regex = Regex("\\s*<sshConfig[^>]*id=\"$hostName\"[^>]*>.*?</sshConfig>", RegexOption.DOT_MATCHES_ALL)
+                    val updatedContent = content.replace(regex, "")
+                    sshFile.writeText(updatedContent)
                 }
             }
         }
@@ -514,7 +542,9 @@ class MyToolWindowFactory : ToolWindowFactory {
             val dialog = JDialog()
             dialog.title = if (existingHost == null) "Add SSH Host" else "Edit SSH Host"
             dialog.isModal = true
-            dialog.layout = GridBagLayout()
+            
+            val contentPanel = JPanel(GridBagLayout())
+            contentPanel.border = BorderFactory.createEmptyBorder(15, 15, 15, 15)
             
             val gbc = GridBagConstraints()
             gbc.insets = Insets(5, 5, 5, 5)
@@ -551,6 +581,8 @@ class MyToolWindowFactory : ToolWindowFactory {
                 }
             }
             
+            val createSshConfigCheckbox = JCheckBox("Create SSH config for IntelliJ IDEA", true)
+            
             val fields = listOf(
                 "Project:" to projectCombo,
                 "Host:" to hostField,
@@ -560,18 +592,22 @@ class MyToolWindowFactory : ToolWindowFactory {
             
             fields.forEachIndexed { index, (label, field) ->
                 gbc.gridx = 0; gbc.gridy = index
-                dialog.add(JLabel(label), gbc)
+                contentPanel.add(JLabel(label), gbc)
                 gbc.gridx = 1; gbc.gridwidth = 2
-                dialog.add(field, gbc)
+                contentPanel.add(field, gbc)
                 gbc.gridwidth = 1
             }
             
             gbc.gridx = 0; gbc.gridy = fields.size
-            dialog.add(JLabel("Identity File:"), gbc)
+            contentPanel.add(JLabel("Identity File:"), gbc)
             gbc.gridx = 1
-            dialog.add(identityField, gbc)
+            contentPanel.add(identityField, gbc)
             gbc.gridx = 2
-            dialog.add(browseButton, gbc)
+            contentPanel.add(browseButton, gbc)
+            
+            gbc.gridx = 0; gbc.gridy = fields.size + 1; gbc.gridwidth = 3
+            contentPanel.add(createSshConfigCheckbox, gbc)
+            gbc.gridwidth = 1
             
             val buttonPanel = JPanel()
             val saveButton = JButton("Save")
@@ -602,6 +638,12 @@ class MyToolWindowFactory : ToolWindowFactory {
                     
                     saveHost(existingHost?.name, hostValue, hostValue, 
                            userField.text.trim(), portField.text.trim(), identityFile, selectedProject)
+                    
+                    // Create SSH XML for IntelliJ projects if checkbox is selected
+                    if (createSshConfigCheckbox.isSelected) {
+                        createSshXmlForProjects(hostValue, hostValue, userField.text.trim(), portField.text.trim().toIntOrNull() ?: 22, identityFile, selectedProject)
+                    }
+                    
                     dialog.dispose()
                     refreshHosts()
                 } catch (e: Exception) {
@@ -614,10 +656,11 @@ class MyToolWindowFactory : ToolWindowFactory {
             buttonPanel.add(saveButton)
             buttonPanel.add(cancelButton)
             
-            gbc.gridx = 0; gbc.gridy = fields.size + 1
+            gbc.gridx = 0; gbc.gridy = fields.size + 2
             gbc.gridwidth = 3
-            dialog.add(buttonPanel, gbc)
+            contentPanel.add(buttonPanel, gbc)
             
+            dialog.contentPane = contentPanel
             dialog.pack()
             dialog.setLocationRelativeTo(null)
             dialog.isVisible = true
@@ -751,8 +794,58 @@ class MyToolWindowFactory : ToolWindowFactory {
             val newName = "${host.name}_copy"
             val originalProject = getProjectForHost(host.name) ?: "Unknown"
             saveHost(null, newName, host.hostname ?: "", host.user ?: "", host.port?.toString() ?: "", host.identityFile ?: "", originalProject)
+            
+            // Create SSH XML for duplicated host
+            createSshXmlForProjects(newName, host.hostname ?: "", host.user ?: "dev", host.port ?: 22, host.identityFile ?: "", originalProject)
+            
             refreshHosts()
         }
+        
+        private fun createSshXmlForProjects(hostName: String, hostname: String, user: String, port: Int, identityFile: String, selectedProject: String) {
+            val projectsDir = File(System.getProperty("user.home"), "Projects")
+            if (!projectsDir.exists()) return
+            
+            projectsDir.listFiles()?.filter { it.isDirectory }?.forEach { projectDir ->
+                createSshXml(projectDir.absolutePath, hostName, hostname, user, port, identityFile, selectedProject)
+            }
+        }
+        
+        private fun createSshXml(projectBasePath: String, hostName: String, hostname: String, user: String, port: Int, identityFile: String, selectedProject: String) {
+            val ideaDir = File(projectBasePath, ".idea")
+            if (!ideaDir.exists()) ideaDir.mkdirs()
+            
+            val sshFile = File(ideaDir, "sshConfigs.xml")
+            val keyPath = if (identityFile.isNotEmpty()) "keyPath=\"\$USER_HOME\$/.ssh/id_rsa\"" else ""
+            val customName = selectedProject
+            
+            val newConfig = "      <sshConfig host=\"$hostname\" id=\"$hostName\" $keyPath port=\"$port\" customName=\"$customName\" nameFormat=\"CUSTOM\" username=\"$user\" useOpenSSHConfig=\"true\">\n        <option name=\"customName\" value=\"$customName\" />\n      </sshConfig>"
+            
+            if (sshFile.exists()) {
+                val content = sshFile.readText()
+                if (content.contains("id=\"$hostName\"")) {
+                    // Host already exists, replace it
+                    val regex = Regex("<sshConfig[^>]*id=\"$hostName\"[^>]*>.*?</sshConfig>", RegexOption.DOT_MATCHES_ALL)
+                    val updatedContent = content.replace(regex, newConfig.replace("\n", "\n"))
+                    sshFile.writeText(updatedContent)
+                } else {
+                    // Add new host before closing </configs>
+                    val updatedContent = content.replace("    </configs>", "$newConfig\n    </configs>")
+                    sshFile.writeText(updatedContent)
+                }
+            } else {
+                // Create new file
+                val xml = """<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="SshConfigs">
+    <configs>
+$newConfig
+    </configs>
+  </component>
+</project>"""
+                sshFile.writeText(xml)
+            }
+        }
+
     }
     
     class SshHostRenderer : DefaultListCellRenderer() {

@@ -11,14 +11,18 @@ class SshConfigService {
     fun getAllHosts(): List<SshHost> = parser.parseConfig()
     
     fun removeHost(hostName: String) {
+        println("Removing host: $hostName")
         // Try to find and remove from project files first
         val confDDir = FileUtils.getSshConfDDir()
         var removed = false
         
         if (confDDir.exists()) {
+            println("Checking conf.d directory: ${confDDir.absolutePath}")
             confDDir.listFiles()?.filter { it.isDirectory }?.forEach { projectDir ->
                 val hostFile = java.io.File(projectDir, hostName)
+                println("Checking host file: ${hostFile.absolutePath}")
                 if (hostFile.exists()) {
+                    println("Deleting host file: ${hostFile.absolutePath}")
                     hostFile.delete()
                     removed = true
                 }
@@ -27,7 +31,10 @@ class SshConfigService {
         
         // If not found in project files, try main config
         if (!removed) {
+            println("Host not found in project files, trying main config")
             removeHostFromMainConfig(hostName)
+        } else {
+            println("Host removed from project files")
         }
     }
     
@@ -54,7 +61,7 @@ class SshConfigService {
     }
     
     fun removeProjectHost(projectName: String, hostName: String) {
-        val hostFile = FileUtils.getProjectHostFile(projectName, hostName)
+        val hostFile = FileUtils.getProjectHostFile(projectName.lowercase(), hostName)
         if (hostFile.exists()) {
             hostFile.delete()
         }
@@ -62,17 +69,24 @@ class SshConfigService {
     
     fun removeHostFromMainConfig(hostName: String) {
         val configFile = FileUtils.getSshConfigFile()
-        if (!configFile.exists()) return
+        println("Removing from main config: ${configFile.absolutePath}")
+        if (!configFile.exists()) {
+            println("Main config file does not exist")
+            return
+        }
         
         val lines = configFile.readLines().toMutableList()
         val newLines = mutableListOf<String>()
         var skipHost = false
+        var hostFound = false
         
         for (line in lines) {
             val trimmed = line.trim()
             
             if (trimmed.startsWith("Host ") && trimmed.substringAfter("Host ").trim() == hostName) {
+                println("Found host in main config: $hostName")
                 skipHost = true
+                hostFound = true
                 continue
             }
             
@@ -85,7 +99,12 @@ class SshConfigService {
             }
         }
         
-        configFile.writeText(newLines.joinToString("\n"))
+        if (hostFound) {
+            configFile.writeText(newLines.joinToString("\n"))
+            println("Host removed from main config")
+        } else {
+            println("Host not found in main config")
+        }
     }
     
     private fun buildGatewayConfig(identityFile: String): String = """

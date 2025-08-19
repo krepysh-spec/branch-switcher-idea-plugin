@@ -369,7 +369,7 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
             dialog.layout = GridBagLayout()
             
             val gbc = GridBagConstraints()
-            gbc.insets = Insets(5, 5, 5, 5)
+            gbc.insets = Insets(10, 15, 10, 15)
             gbc.anchor = GridBagConstraints.WEST
             
             val defaultIdentityPath = java.io.File(System.getProperty("user.home"), ".ssh/id_rsa")
@@ -460,9 +460,11 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
         
         private fun deleteHost(host: SshHost) {
             val deleteFromSshConfigsCheckbox = JCheckBox("Also delete from IntelliJ SSH configs", true)
+            val deleteFromDeploymentCheckbox = JCheckBox("Also delete from deployment configs", true)
             val message = arrayOf(
                 "Are you sure you want to delete host '${host.name}'?",
-                deleteFromSshConfigsCheckbox
+                deleteFromSshConfigsCheckbox,
+                deleteFromDeploymentCheckbox
             )
             
             val result = JOptionPane.showConfirmDialog(
@@ -479,6 +481,10 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
                     
                     if (deleteFromSshConfigsCheckbox.isSelected) {
                         removeHostFromSshConfigs(host.name)
+                    }
+                    
+                    if (deleteFromDeploymentCheckbox.isSelected) {
+                        removeHostFromDeploymentConfigs(host.name)
                     }
                     
                     refreshHosts()
@@ -557,6 +563,7 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
             }
             
             val createSshConfigCheckbox = JCheckBox("Create SSH config for IntelliJ IDEA", true)
+            val createDeploymentCheckbox = JCheckBox("Create deployment config", true)
             
             val fields = listOf(
                 "Project:" to projectCombo,
@@ -622,6 +629,9 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
             
             gbc.gridx = 0; gbc.gridy = fields.size + 1; gbc.gridwidth = 3
             contentPanel.add(createSshConfigCheckbox, gbc)
+            
+            gbc.gridy = fields.size + 2
+            contentPanel.add(createDeploymentCheckbox, gbc)
             gbc.gridwidth = 1
             
             val buttonPanel = JPanel()
@@ -661,6 +671,12 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
                         createSshXmlForProjects(hostValue, hostValue, userField.text.trim(), portField.text.trim().toIntOrNull() ?: 22, identityFile, selectedProject)
                     }
                     
+                    // Create deployment config if checkbox is selected
+                    if (createDeploymentCheckbox.isSelected) {
+                        println("Creating deployment config")
+                        createDeploymentConfigForProjects(hostValue, selectedProject)
+                    }
+                    
                     dialog.dispose()
                     println("Refreshing hosts after save")
                     refreshHosts()
@@ -674,7 +690,7 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
             buttonPanel.add(saveButton)
             buttonPanel.add(cancelButton)
             
-            gbc.gridx = 0; gbc.gridy = fields.size + 2
+            gbc.gridx = 0; gbc.gridy = fields.size + 3
             gbc.gridwidth = 3
             contentPanel.add(buttonPanel, gbc)
             
@@ -793,6 +809,9 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
             
             // Create SSH XML for duplicated host
             createSshXmlForProjects(newName, host.hostname ?: "", host.user ?: "dev", host.port ?: 22, host.identityFile ?: "", originalProject)
+            
+            // Create deployment config for duplicated host
+            createDeploymentConfigForProjects(newName, originalProject)
             
             refreshHosts()
         }
@@ -928,6 +947,121 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
             
             val transformer = TransformerFactory.newInstance().newTransformer()
             transformer.transform(DOMSource(doc), StreamResult(xmlFile))
+        }
+        
+        private fun createDeploymentConfigForProjects(hostName: String, selectedProject: String) {
+            val projectsDir = File(System.getProperty("user.home"), "Projects")
+            if (!projectsDir.exists()) return
+            
+            projectsDir.listFiles()?.filter { it.isDirectory }?.forEach { projectDir ->
+                createWebServersXml(projectDir.absolutePath, hostName, selectedProject)
+            }
+        }
+        
+        private fun createWebServersXml(projectBasePath: String, hostName: String, selectedProject: String) {
+            val ideaDir = File(projectBasePath, ".idea")
+            if (!ideaDir.exists()) ideaDir.mkdirs()
+            
+            val webServersFile = File(ideaDir, "webServers.xml")
+            addOrUpdateWebServer(webServersFile, hostName, selectedProject)
+        }
+        
+        private fun addOrUpdateWebServer(xmlFile: File, hostName: String, selectedProject: String) {
+            try {
+                val doc = if (xmlFile.exists()) {
+                    val factory = DocumentBuilderFactory.newInstance()
+                    val builder = factory.newDocumentBuilder()
+                    builder.parse(xmlFile)
+                } else {
+                    createEmptyWebServersDocument()
+                }
+                
+                val serversElement = doc.getElementsByTagName("option").item(0) as Element
+                val webServer = doc.createElement("webServer")
+                webServer.setAttribute("id", java.util.UUID.randomUUID().toString())
+                webServer.setAttribute("name", selectedProject)
+                
+                val fileTransfer = doc.createElement("fileTransfer")
+                fileTransfer.setAttribute("rootFolder", "/home/dev/backend")
+                fileTransfer.setAttribute("accessType", "SFTP")
+                fileTransfer.setAttribute("host", hostName)
+                fileTransfer.setAttribute("port", "22")
+                fileTransfer.setAttribute("sshConfigId", java.util.UUID.randomUUID().toString())
+                fileTransfer.setAttribute("sshConfig", selectedProject)
+                fileTransfer.setAttribute("keyPair", "true")
+                
+                val advancedOptions = doc.createElement("advancedOptions")
+                val advancedOptionsInner = doc.createElement("advancedOptions")
+                advancedOptionsInner.setAttribute("dataProtectionLevel", "Private")
+                advancedOptionsInner.setAttribute("keepAliveTimeout", "0")
+                advancedOptionsInner.setAttribute("passiveMode", "true")
+                advancedOptionsInner.setAttribute("shareSSLContext", "true")
+                advancedOptionsInner.setAttribute("isUseRsync", "true")
+                
+                advancedOptions.appendChild(advancedOptionsInner)
+                fileTransfer.appendChild(advancedOptions)
+                webServer.appendChild(fileTransfer)
+                serversElement.appendChild(webServer)
+                
+                val transformer = TransformerFactory.newInstance().newTransformer()
+                transformer.transform(DOMSource(doc), StreamResult(xmlFile))
+            } catch (e: Exception) {
+                println("Error creating webServers.xml: ${e.message}")
+            }
+        }
+        
+        private fun createEmptyWebServersDocument(): Document {
+            val factory = DocumentBuilderFactory.newInstance()
+            val builder = factory.newDocumentBuilder()
+            val doc = builder.newDocument()
+            
+            val project = doc.createElement("project")
+            project.setAttribute("version", "4")
+            doc.appendChild(project)
+            
+            val component = doc.createElement("component")
+            component.setAttribute("name", "WebServers")
+            project.appendChild(component)
+            
+            val option = doc.createElement("option")
+            option.setAttribute("name", "servers")
+            component.appendChild(option)
+            
+            return doc
+        }
+        
+        private fun removeHostFromDeploymentConfigs(hostName: String) {
+            val projectsDir = File(System.getProperty("user.home"), "Projects")
+            if (!projectsDir.exists()) return
+            
+            projectsDir.listFiles()?.filter { it.isDirectory }?.forEach { projectDir ->
+                val webServersFile = File(projectDir, ".idea/webServers.xml")
+                if (webServersFile.exists()) {
+                    removeWebServerFromXml(webServersFile, hostName)
+                }
+            }
+        }
+        
+        private fun removeWebServerFromXml(xmlFile: File, hostName: String) {
+            try {
+                val factory = DocumentBuilderFactory.newInstance()
+                val builder = factory.newDocumentBuilder()
+                val doc = builder.parse(xmlFile)
+                
+                val webServers = doc.getElementsByTagName("webServer")
+                for (i in webServers.length - 1 downTo 0) {
+                    val webServer = webServers.item(i) as Element
+                    val fileTransfer = webServer.getElementsByTagName("fileTransfer").item(0) as? Element
+                    if (fileTransfer?.getAttribute("host") == hostName) {
+                        webServer.parentNode.removeChild(webServer)
+                    }
+                }
+                
+                val transformer = TransformerFactory.newInstance().newTransformer()
+                transformer.transform(DOMSource(doc), StreamResult(xmlFile))
+            } catch (e: Exception) {
+                println("Error removing from webServers.xml: ${e.message}")
+            }
         }
 
     }

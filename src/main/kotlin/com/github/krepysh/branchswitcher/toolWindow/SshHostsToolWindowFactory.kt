@@ -18,6 +18,12 @@ import com.github.krepysh.branchswitcher.service.SshConfigService
 import java.awt.*
 import java.io.File
 import javax.swing.*
+import javax.xml.parsers.DocumentBuilderFactory
+import javax.xml.transform.TransformerFactory
+import javax.xml.transform.dom.DOMSource
+import javax.xml.transform.stream.StreamResult
+import org.w3c.dom.Document
+import org.w3c.dom.Element
 
 enum class ConnectionStatus { UNKNOWN, TESTING, SUCCESS, FAILED }
 
@@ -151,17 +157,20 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
         }
         
         private fun refreshHosts() {
+            println("Refreshing hosts...")
             listModel.clear()
             val configFile = java.io.File(System.getProperty("user.home"), ".ssh/config")
             
             if (configFile.exists()) {
                 val hosts = parser.parseConfig()
+                println("Found ${hosts.size} hosts: ${hosts.map { it.name }}")
                 val hostsWithProjects = hosts.map { host ->
                     val project = getProjectForHost(host.name)
                     HostItem(host, project)
                 }
                 
                 val grouped = hostsWithProjects.groupBy { it.project ?: "No Project" }
+                println("Grouped hosts: ${grouped.keys}")
                 
                 // Initialize all projects as expanded if expandedProjects is empty
                 if (expandedProjects.isEmpty()) {
@@ -172,11 +181,17 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
                     val isExpanded = expandedProjects.contains(project)
                     val header = ProjectHeader(project, isExpanded)
                     listModel.addElement(header)
+                    println("Added project header: $project (expanded: $isExpanded)")
                     
                     if (isExpanded) {
-                        hostItems.forEach { listModel.addElement(it) }
+                        hostItems.forEach { 
+                            listModel.addElement(it)
+                            println("Added host: ${it.host.name}")
+                        }
                     }
                 }
+            } else {
+                println("SSH config file does not exist")
             }
         }
         
@@ -480,19 +495,13 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
             projectsDir.listFiles()?.filter { it.isDirectory }?.forEach { projectDir ->
                 val sshFile = File(projectDir, ".idea/sshConfigs.xml")
                 if (sshFile.exists()) {
-                    val content = sshFile.readText()
-                    val regex = Regex("\\s*<sshConfig[^>]*id=\"$hostName\"[^>]*>.*?</sshConfig>", RegexOption.DOT_MATCHES_ALL)
-                    val updatedContent = content.replace(regex, "")
-                    sshFile.writeText(updatedContent)
+                    removeHostFromXml(sshFile, hostName)
                 }
             }
         }
         
         private fun removeHostFromConfig(hostName: String) {
-            val project = getProjectForHost(hostName)
-            if (project != null) {
-                sshService.removeProjectHost(project.lowercase(), hostName)
-            }
+            sshService.removeHost(hostName)
         }
         
         private fun showAddHostDialog() {
@@ -642,15 +651,18 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
                         return@addActionListener
                     }
                     
+                    println("Saving host: $hostValue for project: $selectedProject")
                     saveHost(existingHost?.name, hostValue, hostValue, 
                            userField.text.trim(), portField.text.trim(), identityFile, selectedProject)
                     
                     // Create SSH XML for IntelliJ projects if checkbox is selected
                     if (createSshConfigCheckbox.isSelected) {
+                        println("Creating SSH XML for projects")
                         createSshXmlForProjects(hostValue, hostValue, userField.text.trim(), portField.text.trim().toIntOrNull() ?: 22, identityFile, selectedProject)
                     }
                     
                     dialog.dispose()
+                    println("Refreshing hosts after save")
                     refreshHosts()
                 } catch (e: Exception) {
                     JOptionPane.showMessageDialog(dialog, "Error saving host: ${e.message}", "Error", JOptionPane.ERROR_MESSAGE)
@@ -799,35 +811,123 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
             if (!ideaDir.exists()) ideaDir.mkdirs()
             
             val sshFile = File(ideaDir, "sshConfigs.xml")
-            val keyPath = if (identityFile.isNotEmpty()) "keyPath=\"\$USER_HOME\$/.ssh/id_rsa\"" else ""
-            val customName = selectedProject
-            
-            val newConfig = "      <sshConfig host=\"$hostname\" id=\"$hostName\" $keyPath port=\"$port\" customName=\"$customName\" nameFormat=\"CUSTOM\" username=\"$user\" useOpenSSHConfig=\"true\">\n        <option name=\"customName\" value=\"$customName\" />\n      </sshConfig>"
-            
-            if (sshFile.exists()) {
-                val content = sshFile.readText()
-                if (content.contains("id=\"$hostName\"")) {
-                    // Host already exists, replace it
-                    val regex = Regex("<sshConfig[^>]*id=\"$hostName\"[^>]*>.*?</sshConfig>", RegexOption.DOT_MATCHES_ALL)
-                    val updatedContent = content.replace(regex, newConfig.replace("\n", "\n"))
-                    sshFile.writeText(updatedContent)
-                } else {
-                    // Add new host before closing </configs>
-                    val updatedContent = content.replace("    </configs>", "$newConfig\n    </configs>")
-                    sshFile.writeText(updatedContent)
+            addOrUpdateHostInXml(sshFile, hostName, hostname, user, port, identityFile, selectedProject)
+        }
+        
+        private fun removeHostFromXml(xmlFile: File, hostName: String) {
+            try {
+                val factory = DocumentBuilderFactory.newInstance()
+                val builder = factory.newDocumentBuilder()
+                val doc = builder.parse(xmlFile)
+                
+                val configs = doc.getElementsByTagName("sshConfig")
+                for (i in configs.length - 1 downTo 0) {
+                    val config = configs.item(i) as Element
+                    if (config.getAttribute("id") == hostName) {
+                        config.parentNode.removeChild(config)
+                    }
                 }
-            } else {
-                // Create new file
-                val xml = """<?xml version="1.0" encoding="UTF-8"?>
-<project version="4">
-  <component name="SshConfigs">
-    <configs>
-$newConfig
-    </configs>
-  </component>
-</project>"""
-                sshFile.writeText(xml)
+                
+                val transformer = TransformerFactory.newInstance().newTransformer()
+                transformer.transform(DOMSource(doc), StreamResult(xmlFile))
+            } catch (e: Exception) {
+                // Fallback to empty file if parsing fails
+                xmlFile.writeText("")
             }
+        }
+        
+        private fun addOrUpdateHostInXml(xmlFile: File, hostName: String, hostname: String, user: String, port: Int, identityFile: String, selectedProject: String) {
+            try {
+                val doc = if (xmlFile.exists()) {
+                    val factory = DocumentBuilderFactory.newInstance()
+                    val builder = factory.newDocumentBuilder()
+                    builder.parse(xmlFile)
+                } else {
+                    createEmptyXmlDocument()
+                }
+                
+                // Remove existing host if present
+                val configs = doc.getElementsByTagName("sshConfig")
+                for (i in configs.length - 1 downTo 0) {
+                    val config = configs.item(i) as Element
+                    if (config.getAttribute("id") == hostName) {
+                        config.parentNode.removeChild(config)
+                    }
+                }
+                
+                // Add new host
+                val configsElement = doc.getElementsByTagName("configs").item(0) as Element
+                val sshConfig = doc.createElement("sshConfig")
+                sshConfig.setAttribute("host", hostname)
+                sshConfig.setAttribute("id", hostName)
+                if (identityFile.isNotEmpty()) {
+                    sshConfig.setAttribute("keyPath", "\$USER_HOME\$/.ssh/id_rsa")
+                }
+                sshConfig.setAttribute("port", port.toString())
+                sshConfig.setAttribute("customName", selectedProject)
+                sshConfig.setAttribute("nameFormat", "CUSTOM")
+                sshConfig.setAttribute("username", user)
+                sshConfig.setAttribute("useOpenSSHConfig", "true")
+                
+                val option = doc.createElement("option")
+                option.setAttribute("name", "customName")
+                option.setAttribute("value", selectedProject)
+                sshConfig.appendChild(option)
+                
+                configsElement.appendChild(sshConfig)
+                
+                val transformer = TransformerFactory.newInstance().newTransformer()
+                transformer.transform(DOMSource(doc), StreamResult(xmlFile))
+            } catch (e: Exception) {
+                // Fallback to string-based creation if DOM fails
+                createXmlFallback(xmlFile, hostName, hostname, user, port, identityFile, selectedProject)
+            }
+        }
+        
+        private fun createEmptyXmlDocument(): Document {
+            val factory = DocumentBuilderFactory.newInstance()
+            val builder = factory.newDocumentBuilder()
+            val doc = builder.newDocument()
+            
+            val project = doc.createElement("project")
+            project.setAttribute("version", "4")
+            doc.appendChild(project)
+            
+            val component = doc.createElement("component")
+            component.setAttribute("name", "SshConfigs")
+            project.appendChild(component)
+            
+            val configs = doc.createElement("configs")
+            component.appendChild(configs)
+            
+            return doc
+        }
+        
+        private fun createXmlFallback(xmlFile: File, hostName: String, hostname: String, user: String, port: Int, identityFile: String, selectedProject: String) {
+            val doc = createEmptyXmlDocument()
+            val configsElement = doc.getElementsByTagName("configs").item(0) as Element
+            
+            val sshConfig = doc.createElement("sshConfig")
+            sshConfig.setAttribute("host", hostname)
+            sshConfig.setAttribute("id", hostName)
+            if (identityFile.isNotEmpty()) {
+                sshConfig.setAttribute("keyPath", "\$USER_HOME\$/.ssh/id_rsa")
+            }
+            sshConfig.setAttribute("port", port.toString())
+            sshConfig.setAttribute("customName", selectedProject)
+            sshConfig.setAttribute("nameFormat", "CUSTOM")
+            sshConfig.setAttribute("username", user)
+            sshConfig.setAttribute("useOpenSSHConfig", "true")
+            
+            val option = doc.createElement("option")
+            option.setAttribute("name", "customName")
+            option.setAttribute("value", selectedProject)
+            sshConfig.appendChild(option)
+            
+            configsElement.appendChild(sshConfig)
+            
+            val transformer = TransformerFactory.newInstance().newTransformer()
+            transformer.transform(DOMSource(doc), StreamResult(xmlFile))
         }
 
     }

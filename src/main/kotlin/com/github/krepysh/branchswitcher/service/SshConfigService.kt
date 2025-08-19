@@ -10,6 +10,27 @@ class SshConfigService {
     
     fun getAllHosts(): List<SshHost> = parser.parseConfig()
     
+    fun removeHost(hostName: String) {
+        // Try to find and remove from project files first
+        val confDDir = FileUtils.getSshConfDDir()
+        var removed = false
+        
+        if (confDDir.exists()) {
+            confDDir.listFiles()?.filter { it.isDirectory }?.forEach { projectDir ->
+                val hostFile = java.io.File(projectDir, hostName)
+                if (hostFile.exists()) {
+                    hostFile.delete()
+                    removed = true
+                }
+            }
+        }
+        
+        // If not found in project files, try main config
+        if (!removed) {
+            removeHostFromMainConfig(hostName)
+        }
+    }
+    
     fun hasGatewayHost(): Boolean = getAllHosts().any { it.name == SshConstants.GATEWAY_HOST }
     
     fun getGatewayHost(): SshHost? = getAllHosts().find { it.name == SshConstants.GATEWAY_HOST }
@@ -37,6 +58,34 @@ class SshConfigService {
         if (hostFile.exists()) {
             hostFile.delete()
         }
+    }
+    
+    fun removeHostFromMainConfig(hostName: String) {
+        val configFile = FileUtils.getSshConfigFile()
+        if (!configFile.exists()) return
+        
+        val lines = configFile.readLines().toMutableList()
+        val newLines = mutableListOf<String>()
+        var skipHost = false
+        
+        for (line in lines) {
+            val trimmed = line.trim()
+            
+            if (trimmed.startsWith("Host ") && trimmed.substringAfter("Host ").trim() == hostName) {
+                skipHost = true
+                continue
+            }
+            
+            if (skipHost && trimmed.startsWith("Host ")) {
+                skipHost = false
+            }
+            
+            if (!skipHost) {
+                newLines.add(line)
+            }
+        }
+        
+        configFile.writeText(newLines.joinToString("\n"))
     }
     
     private fun buildGatewayConfig(identityFile: String): String = """

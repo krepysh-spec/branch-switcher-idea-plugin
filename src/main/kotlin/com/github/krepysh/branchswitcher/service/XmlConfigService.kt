@@ -243,9 +243,16 @@ class XmlConfigService {
                     webServer.parentNode.removeChild(webServer)
                 }
             }
-            saveDocument(doc, xmlFile)
+            
+            val remaining = doc.getElementsByTagName("webServer").length
+            if (remaining == 0) {
+                xmlFile.delete()
+            } else {
+                saveDocument(doc, xmlFile)
+            }
         } catch (e: Exception) {
-            // Ignore
+            // Якщо файл пошкоджено — видалити, щоб не залишати зламаний XML
+            xmlFile.delete()
         }
     }
     
@@ -320,6 +327,7 @@ class XmlConfigService {
             setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "2")
             setOutputProperty(javax.xml.transform.OutputKeys.ENCODING, "UTF-8")
             setOutputProperty(javax.xml.transform.OutputKeys.OMIT_XML_DECLARATION, "false")
+            setOutputProperty(javax.xml.transform.OutputKeys.STANDALONE, "no")
         }.transform(DOMSource(doc), StreamResult(file))
     }
     

@@ -186,9 +186,19 @@ class DataSourceService {
         try {
             val doc = parseXmlDocument(xmlFile)
             removeExistingDataSource(doc, hostName, hostName)
-            saveDocument(doc, xmlFile)
+            
+            // Check if there are any data sources left
+            val remainingDataSources = doc.getElementsByTagName("data-source")
+            if (remainingDataSources.length == 0) {
+                // If no data sources left, delete the file
+                xmlFile.delete()
+            } else {
+                // Save the cleaned document
+                saveDocument(doc, xmlFile)
+            }
         } catch (e: Exception) {
-            // Ignore
+            // If parsing fails, delete the corrupted file
+            xmlFile.delete()
         }
     }
     
@@ -196,9 +206,19 @@ class DataSourceService {
         try {
             val doc = parseXmlDocument(localXmlFile)
             removeExistingLocalDataSource(doc, hostName, hostName)
-            saveDocument(doc, localXmlFile)
+            
+            // Check if there are any data sources left
+            val remainingDataSources = doc.getElementsByTagName("data-source")
+            if (remainingDataSources.length == 0) {
+                // If no data sources left, delete the file
+                localXmlFile.delete()
+            } else {
+                // Save the cleaned document
+                saveDocument(doc, localXmlFile)
+            }
         } catch (e: Exception) {
-            // Ignore
+            // If parsing fails, delete the corrupted file
+            localXmlFile.delete()
         }
     }
     
@@ -212,9 +232,19 @@ class DataSourceService {
                     dataSource.parentNode.removeChild(dataSource)
                 }
             }
-            saveDocument(doc, xmlFile)
+            
+            // Check if there are any data sources left
+            val remainingDataSources = doc.getElementsByTagName("data-source")
+            if (remainingDataSources.length == 0) {
+                // If no data sources left, delete the file
+                xmlFile.delete()
+            } else {
+                // Save the cleaned document
+                saveDocument(doc, xmlFile)
+            }
         } catch (e: Exception) {
-            // Ignore
+            // If parsing fails, delete the corrupted file
+            xmlFile.delete()
         }
     }
     
@@ -228,9 +258,19 @@ class DataSourceService {
                     dataSource.parentNode.removeChild(dataSource)
                 }
             }
-            saveDocument(doc, localXmlFile)
+            
+            // Check if there are any data sources left
+            val remainingDataSources = doc.getElementsByTagName("data-source")
+            if (remainingDataSources.length == 0) {
+                // If no data sources left, delete the file
+                localXmlFile.delete()
+            } else {
+                // Save the cleaned document
+                saveDocument(doc, localXmlFile)
+            }
         } catch (e: Exception) {
-            // Ignore
+            // If parsing fails, delete the corrupted file
+            localXmlFile.delete()
         }
     }
     
@@ -279,11 +319,18 @@ class DataSourceService {
             })
         }
     
+    private fun shouldCreateFile(doc: Document): Boolean {
+        val dataSources = doc.getElementsByTagName("data-source")
+        return dataSources.length > 0
+    }
+    
     private fun saveDocument(doc: Document, file: File) {
         TransformerFactory.newInstance().newTransformer().apply {
             setOutputProperty(javax.xml.transform.OutputKeys.INDENT, "yes")
             setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "2")
             setOutputProperty(javax.xml.transform.OutputKeys.ENCODING, "UTF-8")
+            setOutputProperty(javax.xml.transform.OutputKeys.OMIT_XML_DECLARATION, "false")
+            setOutputProperty(javax.xml.transform.OutputKeys.STANDALONE, "no")
         }.transform(DOMSource(doc), StreamResult(file))
     }
     

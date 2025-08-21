@@ -1,5 +1,6 @@
 package com.github.krepysh.branchswitcher.service
 
+import com.github.krepysh.branchswitcher.config.XmlConstants
 import com.intellij.openapi.application.ApplicationManager
 import java.io.File
 import javax.xml.parsers.DocumentBuilderFactory
@@ -26,7 +27,7 @@ class XmlConfigService {
         allProjects.forEach { project ->
             if (project.absolutePath == currentProject.absolutePath) return@forEach
             // Check SSH configs
-            val sshFile = File(project, ".idea/sshConfigs.xml")
+            val sshFile = File(project, "${XmlConstants.IDEA_DIR}/${XmlConstants.SSH_CONFIGS_XML}")
             if (sshFile.exists()) {
                 try {
                     val factory = DocumentBuilderFactory.newInstance()
@@ -44,7 +45,7 @@ class XmlConfigService {
             }
             
             // Check WebServers configs
-            val webServersFile = File(project, ".idea/webServers.xml")
+            val webServersFile = File(project, "${XmlConstants.IDEA_DIR}/${XmlConstants.WEB_SERVERS_XML}")
             if (webServersFile.exists()) {
                 try {
                     val factory = DocumentBuilderFactory.newInstance()
@@ -82,12 +83,12 @@ class XmlConfigService {
             if (!projectsDir.exists()) return@executeOnPooledThread
             
             projectsDir.listFiles()?.filter { it.isDirectory }?.forEach { projectDir ->
-                val ideaDir = File(projectDir, ".idea")
+                val ideaDir = File(projectDir, XmlConstants.IDEA_DIR)
                 if (!ideaDir.exists()) ideaDir.mkdirs()
                 
-                val sshFile = File(ideaDir, "sshConfigs.xml")
-                val webServersFile = File(ideaDir, "webServers.xml")
-                val deploymentFile = File(ideaDir, "deployment.xml")
+                val sshFile = File(ideaDir, XmlConstants.SSH_CONFIGS_XML)
+                val webServersFile = File(ideaDir, XmlConstants.WEB_SERVERS_XML)
+                val deploymentFile = File(ideaDir, XmlConstants.DEPLOYMENT_XML)
                 val uniqueProjectName = if (sshFile.exists() || webServersFile.exists() || deploymentFile.exists()) getUniqueConfigName(selectedProject, projectDir) else selectedProject
                 addOrUpdateSshConfig(sshFile, hostName, hostname, user, port, identityFile, uniqueProjectName)
             }
@@ -107,12 +108,12 @@ class XmlConfigService {
             
             projectsDir.listFiles()?.filter { it.isDirectory }?.forEach { projectDir ->
                 println("Processing project directory: ${projectDir.name}")
-                val ideaDir = File(projectDir, ".idea")
+                val ideaDir = File(projectDir, XmlConstants.IDEA_DIR)
                 if (!ideaDir.exists()) ideaDir.mkdirs()
                 
-                val sshFile = File(ideaDir, "sshConfigs.xml")
-                val webServersFile = File(ideaDir, "webServers.xml")
-                val deploymentFile = File(ideaDir, "deployment.xml")
+                val sshFile = File(ideaDir, XmlConstants.SSH_CONFIGS_XML)
+                val webServersFile = File(ideaDir, XmlConstants.WEB_SERVERS_XML)
+                val deploymentFile = File(ideaDir, XmlConstants.DEPLOYMENT_XML)
                 val uniqueProjectName = if (sshFile.exists() || webServersFile.exists() || deploymentFile.exists()) getUniqueConfigName(selectedProject, projectDir) else selectedProject
                 
                 addOrUpdateWebServer(webServersFile, hostName, uniqueProjectName)
@@ -128,7 +129,7 @@ class XmlConfigService {
         if (!projectsDir.exists()) return
         
         projectsDir.listFiles()?.filter { it.isDirectory }?.forEach { projectDir ->
-            val sshFile = File(projectDir, ".idea/sshConfigs.xml")
+            val sshFile = File(projectDir, "${XmlConstants.IDEA_DIR}/${XmlConstants.SSH_CONFIGS_XML}")
             if (sshFile.exists()) {
                 removeSshConfigFromXml(sshFile, hostName)
             }
@@ -140,12 +141,12 @@ class XmlConfigService {
         if (!projectsDir.exists()) return
         
         projectsDir.listFiles()?.filter { it.isDirectory }?.forEach { projectDir ->
-            val webServersFile = File(projectDir, ".idea/webServers.xml")
+            val webServersFile = File(projectDir, "${XmlConstants.IDEA_DIR}/${XmlConstants.WEB_SERVERS_XML}")
             if (webServersFile.exists()) {
                 removeWebServerFromXml(webServersFile, hostName)
             }
             
-            val deploymentFile = File(projectDir, ".idea/deployment.xml")
+            val deploymentFile = File(projectDir, "${XmlConstants.IDEA_DIR}/${XmlConstants.DEPLOYMENT_XML}")
             if (deploymentFile.exists()) {
                 removeDeploymentMappingFromXml(deploymentFile, hostName)
             }
@@ -175,7 +176,7 @@ class XmlConfigService {
             sshConfig.setAttribute("host", hostname)
             sshConfig.setAttribute("id", hostName)
             if (identityFile.isNotEmpty()) {
-                sshConfig.setAttribute("keyPath", "\$USER_HOME\$/.ssh/id_rsa")
+                sshConfig.setAttribute("keyPath", XmlConstants.DEFAULT_IDENTITY_PATH)
             }
             sshConfig.setAttribute("port", port.toString())
             sshConfig.setAttribute("customName", selectedProject)
@@ -212,10 +213,10 @@ class XmlConfigService {
             webServer.setAttribute("name", selectedProject)
             
             val fileTransfer = doc.createElement("fileTransfer")
-            fileTransfer.setAttribute("rootFolder", "/home/dev/backend")
+            fileTransfer.setAttribute("rootFolder", XmlConstants.DEFAULT_REMOTE_PATH)
             fileTransfer.setAttribute("accessType", "SFTP")
             fileTransfer.setAttribute("host", hostName)
-            fileTransfer.setAttribute("port", "22")
+            fileTransfer.setAttribute("port", XmlConstants.DEFAULT_SSH_PORT)
             fileTransfer.setAttribute("sshConfigId", java.util.UUID.randomUUID().toString())
             fileTransfer.setAttribute("sshConfig", selectedProject)
             fileTransfer.setAttribute("keyPair", "true")
@@ -338,7 +339,7 @@ class XmlConfigService {
             val mapping = doc.createElement("mapping")
             mapping.setAttribute("deploy", "/")
             mapping.setAttribute("local", "\$PROJECT_DIR\$")
-            mapping.setAttribute("web", "/home/dev/backend")
+            mapping.setAttribute("web", XmlConstants.DEFAULT_REMOTE_PATH)
             
             mappings.appendChild(mapping)
             serverdata.appendChild(mappings)
@@ -433,6 +434,4 @@ class XmlConfigService {
         val result = StreamResult(file)
         transformer.transform(source, result)
     }
-    
-
 }

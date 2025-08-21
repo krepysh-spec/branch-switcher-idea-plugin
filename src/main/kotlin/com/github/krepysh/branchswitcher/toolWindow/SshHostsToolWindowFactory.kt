@@ -477,11 +477,15 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
                     removeHostFromConfig(host.name)
                     
                     if (deleteFromSshConfigsCheckbox.isSelected) {
-                        xmlService.removeSshConfigFromProjects(host.name)
+                        Thread {
+                            xmlService.removeSshConfigFromProjects(host.name)
+                        }.start()
                     }
                     
                     if (deleteFromDeploymentCheckbox.isSelected) {
-                        xmlService.removeDeploymentConfigFromProjects(host.name)
+                        Thread {
+                            xmlService.removeDeploymentConfigFromProjects(host.name)
+                        }.start()
                     }
                     
                     refreshHosts()
@@ -655,13 +659,17 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
                     // Create SSH XML for IntelliJ projects if checkbox is selected
                     if (createSshConfigCheckbox.isSelected) {
                         println("Creating SSH XML for projects")
-                        xmlService.createSshConfigForProjects(hostValue, hostValue, userField.text.trim(), portField.text.trim().toIntOrNull() ?: 22, identityFile, selectedProject)
+                        Thread {
+                            xmlService.createSshConfigForProjects(hostValue, hostValue, userField.text.trim(), portField.text.trim().toIntOrNull() ?: 22, identityFile, selectedProject)
+                        }.start()
                     }
                     
                     // Create deployment config if checkbox is selected
                     if (createDeploymentCheckbox.isSelected) {
                         println("Creating deployment config")
-                        xmlService.createDeploymentConfigForProjects(hostValue, selectedProject)
+                        Thread {
+                            xmlService.createDeploymentConfigForProjects(hostValue, selectedProject)
+                        }.start()
                     }
                     
                     dialog.dispose()
@@ -795,10 +803,14 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
             saveHost(null, newName, host.hostname ?: "", host.user ?: "", host.port?.toString() ?: "", host.identityFile ?: "", originalProject)
             
             // Create SSH XML for duplicated host
-            xmlService.createSshConfigForProjects(newName, host.hostname ?: "", host.user ?: "dev", host.port ?: 22, host.identityFile ?: "", originalProject)
+            Thread {
+                xmlService.createSshConfigForProjects(newName, host.hostname ?: "", host.user ?: "dev", host.port ?: 22, host.identityFile ?: "", originalProject)
+            }.start()
             
             // Create deployment config for duplicated host
-            xmlService.createDeploymentConfigForProjects(newName, originalProject)
+            Thread {
+                xmlService.createDeploymentConfigForProjects(newName, originalProject)
+            }.start()
             
             refreshHosts()
         }

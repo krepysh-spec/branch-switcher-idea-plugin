@@ -24,10 +24,15 @@ class XmlConfigService {
     }
     
     fun createDeploymentConfigForProjects(hostName: String, selectedProject: String) {
+        println("Creating deployment config for host: $hostName, project: $selectedProject")
         val projectsDir = File(System.getProperty("user.home"), "Projects")
-        if (!projectsDir.exists()) return
+        if (!projectsDir.exists()) {
+            println("Projects directory does not exist")
+            return
+        }
         
         projectsDir.listFiles()?.filter { it.isDirectory }?.forEach { projectDir ->
+            println("Processing project directory: ${projectDir.name}")
             val ideaDir = File(projectDir, ".idea")
             if (!ideaDir.exists()) ideaDir.mkdirs()
             
@@ -35,6 +40,7 @@ class XmlConfigService {
             addOrUpdateWebServer(webServersFile, hostName, selectedProject)
             
             val deploymentFile = File(ideaDir, "deployment.xml")
+            println("Creating deployment file: ${deploymentFile.absolutePath}")
             addOrUpdateDeploymentMapping(deploymentFile, selectedProject)
         }
     }
@@ -78,7 +84,6 @@ class XmlConfigService {
                 createEmptySshDocument()
             }
             
-            // Remove existing host if present
             val configs = doc.getElementsByTagName("sshConfig")
             for (i in configs.length - 1 downTo 0) {
                 val config = configs.item(i) as Element
@@ -87,7 +92,6 @@ class XmlConfigService {
                 }
             }
             
-            // Add new host
             val configsElement = doc.getElementsByTagName("configs").item(0) as Element
             val sshConfig = doc.createElement("sshConfig")
             sshConfig.setAttribute("host", hostname)
@@ -144,7 +148,6 @@ class XmlConfigService {
             advancedOptionsInner.setAttribute("keepAliveTimeout", "0")
             advancedOptionsInner.setAttribute("passiveMode", "true")
             advancedOptionsInner.setAttribute("shareSSLContext", "true")
-            advancedOptionsInner.setAttribute("isUseRsync", "true")
             
             advancedOptions.appendChild(advancedOptionsInner)
             fileTransfer.appendChild(advancedOptions)
@@ -217,69 +220,59 @@ class XmlConfigService {
         return doc
     }
     
-    private fun createEmptyWebServersDocument(): Document {
-        val factory = DocumentBuilderFactory.newInstance()
-        val builder = factory.newDocumentBuilder()
-        val doc = builder.newDocument()
-        
-        val project = doc.createElement("project")
-        project.setAttribute("version", "4")
-        doc.appendChild(project)
-        
-        val component = doc.createElement("component")
-        component.setAttribute("name", "WebServers")
-        project.appendChild(component)
-        
-        val option = doc.createElement("option")
-        option.setAttribute("name", "servers")
-        component.appendChild(option)
-        
-        return doc
-    }
-    
     private fun addOrUpdateDeploymentMapping(xmlFile: File, selectedProject: String) {
+        println("Processing deployment file: ${xmlFile.absolutePath}")
         try {
             val doc = if (xmlFile.exists()) {
+                println("File exists, parsing existing")
                 val factory = DocumentBuilderFactory.newInstance()
                 val builder = factory.newDocumentBuilder()
                 builder.parse(xmlFile)
             } else {
+                println("File does not exist, creating new")
                 createEmptyDeploymentDocument()
             }
             
-            val serverDataElement = doc.getElementsByTagName("serverData").item(0) as Element
+            val component = doc.getElementsByTagName("component").item(0) as Element
+            component.setAttribute("serverName", selectedProject)
             
-            // Check if paths already exist
-            val existingPaths = doc.getElementsByTagName("paths")
-            var pathsFound = false
-            for (i in 0 until existingPaths.length) {
-                val paths = existingPaths.item(i) as Element
+            var serverDataElement = doc.getElementsByTagName("serverData").item(0) as? Element
+            if (serverDataElement == null) {
+                println("serverData element not found, creating")
+                serverDataElement = doc.createElement("serverData")
+                component.appendChild(serverDataElement)
+            }
+            
+            val pathsElements = doc.getElementsByTagName("paths")
+            for (i in pathsElements.length - 1 downTo 0) {
+                val paths = pathsElements.item(i) as Element
                 if (paths.getAttribute("name") == selectedProject) {
-                    pathsFound = true
-                    break
+                    paths.parentNode.removeChild(paths)
                 }
             }
             
-            if (!pathsFound) {
-                val paths = doc.createElement("paths")
-                paths.setAttribute("name", selectedProject)
-                
-                val serverdata = doc.createElement("serverdata")
-                val mappings = doc.createElement("mappings")
-                val mapping = doc.createElement("mapping")
-                mapping.setAttribute("deploy", "/")
-                mapping.setAttribute("local", "\$PROJECT_DIR\$")
-                mapping.setAttribute("web", "/home/dev/backend")
-                
-                mappings.appendChild(mapping)
-                serverdata.appendChild(mappings)
-                paths.appendChild(serverdata)
-                serverDataElement.appendChild(paths)
-            }
+            println("Creating paths element for project: $selectedProject")
+            val paths = doc.createElement("paths")
+            paths.setAttribute("name", selectedProject)
             
+            val serverdata = doc.createElement("serverdata")
+            val mappings = doc.createElement("mappings")
+            val mapping = doc.createElement("mapping")
+            mapping.setAttribute("deploy", "/")
+            mapping.setAttribute("local", "\$PROJECT_DIR\$")
+            mapping.setAttribute("web", "/home/dev/backend")
+            
+            mappings.appendChild(mapping)
+            serverdata.appendChild(mappings)
+            paths.appendChild(serverdata)
+            serverDataElement.appendChild(paths)
+            
+            println("Saving document to: ${xmlFile.absolutePath}")
             saveDocument(doc, xmlFile)
+            println("Document saved successfully")
         } catch (e: Exception) {
             println("Error creating deployment.xml: ${e.message}")
+            e.printStackTrace()
         }
     }
     
@@ -303,6 +296,26 @@ class XmlConfigService {
         }
     }
     
+    private fun createEmptyWebServersDocument(): Document {
+        val factory = DocumentBuilderFactory.newInstance()
+        val builder = factory.newDocumentBuilder()
+        val doc = builder.newDocument()
+        
+        val project = doc.createElement("project")
+        project.setAttribute("version", "4")
+        doc.appendChild(project)
+        
+        val component = doc.createElement("component")
+        component.setAttribute("name", "WebServers")
+        project.appendChild(component)
+        
+        val option = doc.createElement("option")
+        option.setAttribute("name", "servers")
+        component.appendChild(option)
+        
+        return doc
+    }
+    
     private fun createEmptyDeploymentDocument(): Document {
         val factory = DocumentBuilderFactory.newInstance()
         val builder = factory.newDocumentBuilder()
@@ -314,9 +327,9 @@ class XmlConfigService {
         
         val component = doc.createElement("component")
         component.setAttribute("name", "PublishConfigData")
-        component.setAttribute("serverName", "")
         component.setAttribute("remoteFilesAllowedToDisappearOnAutoupload", "false")
         component.setAttribute("confirmBeforeUploading", "false")
+        component.setAttribute("serverName", "")
         project.appendChild(component)
         
         val option = doc.createElement("option")
@@ -331,7 +344,17 @@ class XmlConfigService {
     }
     
     private fun saveDocument(doc: Document, file: File) {
-        val transformer = TransformerFactory.newInstance().newTransformer()
-        transformer.transform(DOMSource(doc), StreamResult(file))
+        val transformerFactory = TransformerFactory.newInstance()
+        val transformer = transformerFactory.newTransformer()
+        transformer.setOutputProperty(javax.xml.transform.OutputKeys.INDENT, "yes")
+        transformer.setOutputProperty("{http://xml.apache.org/xslt}indent-amount", "2")
+        transformer.setOutputProperty(javax.xml.transform.OutputKeys.ENCODING, "UTF-8")
+        transformer.setOutputProperty(javax.xml.transform.OutputKeys.OMIT_XML_DECLARATION, "false")
+        
+        val source = DOMSource(doc)
+        val result = StreamResult(file)
+        transformer.transform(source, result)
     }
+    
+
 }

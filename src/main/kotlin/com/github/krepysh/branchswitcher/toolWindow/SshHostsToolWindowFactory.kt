@@ -567,24 +567,8 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
             val createDeploymentCheckbox = JCheckBox("Create deployment config", true)
             val createDataSourceCheckbox = JCheckBox("Create database connection", false)
             
-            val dbNameField = JTextField(existingHost?.dbName ?: "projectdb", 20)
-            val dbPortField = JTextField(existingHost?.dbPort?.toString() ?: "5432", 20)
-            val dbUsernameField = JTextField(existingHost?.dbUsername ?: "postgres", 20)
-            
-            // Enable/disable DB fields based on checkbox
-            createDataSourceCheckbox.addActionListener {
-                val enabled = createDataSourceCheckbox.isSelected
-                dbNameField.isEnabled = enabled
-                dbPortField.isEnabled = enabled
-                dbUsernameField.isEnabled = enabled
-            }
-            
-            // Initialize DB fields state
+            // Initialize DB checkbox state (fields removed, only checkbox remains)
             createDataSourceCheckbox.isSelected = existingHost?.createDataSource ?: false
-            val dbFieldsEnabled = createDataSourceCheckbox.isSelected
-            dbNameField.isEnabled = dbFieldsEnabled
-            dbPortField.isEnabled = dbFieldsEnabled
-            dbUsernameField.isEnabled = dbFieldsEnabled
             
             val fields = listOf(
                 "Project:" to projectCombo,
@@ -657,26 +641,6 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
             gbc.gridy = fields.size + 3
             contentPanel.add(createDataSourceCheckbox, gbc)
             
-            // Database fields
-            gbc.gridwidth = 1
-            gbc.gridy = fields.size + 4
-            gbc.gridx = 0
-            contentPanel.add(JLabel("DB Name:"), gbc)
-            gbc.gridx = 1
-            contentPanel.add(dbNameField, gbc)
-            
-            gbc.gridy = fields.size + 5
-            gbc.gridx = 0
-            contentPanel.add(JLabel("DB Port:"), gbc)
-            gbc.gridx = 1
-            contentPanel.add(dbPortField, gbc)
-            
-            gbc.gridy = fields.size + 6
-            gbc.gridx = 0
-            contentPanel.add(JLabel("DB Username:"), gbc)
-            gbc.gridx = 1
-            contentPanel.add(dbUsernameField, gbc)
-            
             val buttonPanel = JPanel()
             val saveButton = JButton("Save")
             val cancelButton = JButton("Cancel")
@@ -731,9 +695,10 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
                             dataSourceService.createDataSourceForProjects(
                                 hostValue,
                                 hostValue,
-                                dbPortField.text.trim().toIntOrNull() ?: 5432,
-                                dbNameField.text.trim(),
-                                dbUsernameField.text.trim()
+                                5432,
+                                "projectdb",
+                                "postgres",
+                                selectedProject
                             )
                         }.start()
                     }
@@ -751,7 +716,7 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
             buttonPanel.add(saveButton)
             buttonPanel.add(cancelButton)
             
-            gbc.gridx = 0; gbc.gridy = fields.size + 7
+            gbc.gridx = 0; gbc.gridy = fields.size + 4
             gbc.gridwidth = 3
             contentPanel.add(buttonPanel, gbc)
             
@@ -886,7 +851,8 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
                         host.hostname ?: newName,
                         host.dbPort,
                         host.dbName,
-                        host.dbUsername
+                        host.dbUsername,
+                        originalProject
                     )
                 }.start()
             }

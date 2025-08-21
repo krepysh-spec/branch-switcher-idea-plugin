@@ -75,8 +75,12 @@ class SshConfigParser {
             port = properties["port"]?.toIntOrNull(),
             identityFile = properties["identityfile"],
             proxyCommand = properties["proxycommand"],
+            createDataSource = properties["# createdatasource"]?.toBoolean() ?: false,
+            dbName = properties["# dbname"] ?: "projectdb",
+            dbPort = properties["# dbport"]?.toIntOrNull() ?: 5432,
+            dbUsername = properties["# dbusername"] ?: "postgres",
             otherProperties = properties.filterKeys { 
-                it !in setOf("hostname", "user", "port", "identityfile", "proxycommand")
+                it !in setOf("hostname", "user", "port", "identityfile", "proxycommand", "# createdatasource", "# dbname", "# dbport", "# dbusername")
             }
         )
     }

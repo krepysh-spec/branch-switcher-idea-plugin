@@ -7,5 +7,9 @@ data class SshHost(
     val port: Int? = null,
     val identityFile: String? = null,
     val proxyCommand: String? = null,
-    val otherProperties: Map<String, String> = emptyMap()
+    val otherProperties: Map<String, String> = emptyMap(),
+    val createDataSource: Boolean = false,
+    val dbName: String = "projectdb",
+    val dbPort: Int = 5432,
+    val dbUsername: String = "postgres"
 )

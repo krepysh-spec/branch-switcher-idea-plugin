@@ -16,6 +16,7 @@ import com.github.krepysh.branchswitcher.parser.SshConfigParser
 import com.github.krepysh.branchswitcher.model.SshHost
 import com.github.krepysh.branchswitcher.service.SshConfigService
 import com.github.krepysh.branchswitcher.service.XmlConfigService
+import com.github.krepysh.branchswitcher.service.DataSourceService
 import com.github.krepysh.branchswitcher.config.SshConstants
 import java.awt.*
 import java.io.File
@@ -53,6 +54,7 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
         private val parser = SshConfigParser()
         private val sshService = SshConfigService()
         private val xmlService = XmlConfigService()
+        private val dataSourceService = DataSourceService()
         private val listModel = DefaultListModel<ListItem>()
         private val hostList = JBList(listModel)
         private val expandedProjects = mutableSetOf<String>()
@@ -458,10 +460,12 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
         private fun deleteHost(host: SshHost) {
             val deleteFromSshConfigsCheckbox = JCheckBox("Also delete from IntelliJ SSH configs", true)
             val deleteFromDeploymentCheckbox = JCheckBox("Also delete from deployment configs", true)
+            val deleteDataSourceCheckbox = JCheckBox("Also delete database connections", true)
             val message = arrayOf(
                 "Are you sure you want to delete host '${host.name}'?",
                 deleteFromSshConfigsCheckbox,
-                deleteFromDeploymentCheckbox
+                deleteFromDeploymentCheckbox,
+                deleteDataSourceCheckbox
             )
             
             val result = JOptionPane.showConfirmDialog(
@@ -485,6 +489,12 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
                     if (deleteFromDeploymentCheckbox.isSelected) {
                         Thread {
                             xmlService.removeDeploymentConfigFromProjects(host.name)
+                        }.start()
+                    }
+                    
+                    if (deleteDataSourceCheckbox.isSelected) {
+                        Thread {
+                            dataSourceService.removeDataSourceFromProjects(host.name)
                         }.start()
                     }
                     
@@ -555,6 +565,26 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
             
             val createSshConfigCheckbox = JCheckBox("Create SSH config for IntelliJ IDEA", true)
             val createDeploymentCheckbox = JCheckBox("Create deployment config", true)
+            val createDataSourceCheckbox = JCheckBox("Create database connection", false)
+            
+            val dbNameField = JTextField(existingHost?.dbName ?: "projectdb", 20)
+            val dbPortField = JTextField(existingHost?.dbPort?.toString() ?: "5432", 20)
+            val dbUsernameField = JTextField(existingHost?.dbUsername ?: "postgres", 20)
+            
+            // Enable/disable DB fields based on checkbox
+            createDataSourceCheckbox.addActionListener {
+                val enabled = createDataSourceCheckbox.isSelected
+                dbNameField.isEnabled = enabled
+                dbPortField.isEnabled = enabled
+                dbUsernameField.isEnabled = enabled
+            }
+            
+            // Initialize DB fields state
+            createDataSourceCheckbox.isSelected = existingHost?.createDataSource ?: false
+            val dbFieldsEnabled = createDataSourceCheckbox.isSelected
+            dbNameField.isEnabled = dbFieldsEnabled
+            dbPortField.isEnabled = dbFieldsEnabled
+            dbUsernameField.isEnabled = dbFieldsEnabled
             
             val fields = listOf(
                 "Project:" to projectCombo,
@@ -623,7 +653,29 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
             
             gbc.gridy = fields.size + 2
             contentPanel.add(createDeploymentCheckbox, gbc)
+            
+            gbc.gridy = fields.size + 3
+            contentPanel.add(createDataSourceCheckbox, gbc)
+            
+            // Database fields
             gbc.gridwidth = 1
+            gbc.gridy = fields.size + 4
+            gbc.gridx = 0
+            contentPanel.add(JLabel("DB Name:"), gbc)
+            gbc.gridx = 1
+            contentPanel.add(dbNameField, gbc)
+            
+            gbc.gridy = fields.size + 5
+            gbc.gridx = 0
+            contentPanel.add(JLabel("DB Port:"), gbc)
+            gbc.gridx = 1
+            contentPanel.add(dbPortField, gbc)
+            
+            gbc.gridy = fields.size + 6
+            gbc.gridx = 0
+            contentPanel.add(JLabel("DB Username:"), gbc)
+            gbc.gridx = 1
+            contentPanel.add(dbUsernameField, gbc)
             
             val buttonPanel = JPanel()
             val saveButton = JButton("Save")
@@ -672,6 +724,20 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
                         }.start()
                     }
                     
+                    // Create database connection if checkbox is selected
+                    if (createDataSourceCheckbox.isSelected) {
+                        println("Creating database connection")
+                        Thread {
+                            dataSourceService.createDataSourceForProjects(
+                                hostValue,
+                                hostValue,
+                                dbPortField.text.trim().toIntOrNull() ?: 5432,
+                                dbNameField.text.trim(),
+                                dbUsernameField.text.trim()
+                            )
+                        }.start()
+                    }
+                    
                     dialog.dispose()
                     println("Refreshing hosts after save")
                     refreshHosts()
@@ -685,7 +751,7 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
             buttonPanel.add(saveButton)
             buttonPanel.add(cancelButton)
             
-            gbc.gridx = 0; gbc.gridy = fields.size + 3
+            gbc.gridx = 0; gbc.gridy = fields.size + 7
             gbc.gridwidth = 3
             contentPanel.add(buttonPanel, gbc)
             
@@ -811,6 +877,19 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
             Thread {
                 xmlService.createDeploymentConfigForProjects(newName, originalProject)
             }.start()
+            
+            // Create database connection for duplicated host if original had one
+            if (host.createDataSource) {
+                Thread {
+                    dataSourceService.createDataSourceForProjects(
+                        newName,
+                        host.hostname ?: newName,
+                        host.dbPort,
+                        host.dbName,
+                        host.dbUsername
+                    )
+                }.start()
+            }
             
             refreshHosts()
         }

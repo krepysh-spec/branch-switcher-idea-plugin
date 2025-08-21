@@ -16,6 +16,7 @@ import com.github.krepysh.branchswitcher.parser.SshConfigParser
 import com.github.krepysh.branchswitcher.model.SshHost
 import com.github.krepysh.branchswitcher.service.SshConfigService
 import com.github.krepysh.branchswitcher.service.XmlConfigService
+import com.github.krepysh.branchswitcher.config.SshConstants
 import java.awt.*
 import java.io.File
 import javax.swing.*
@@ -344,7 +345,7 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
         private fun showGatewayInitializationDialog(): Boolean {
             val result = JOptionPane.showConfirmDialog(
                 null,
-                "ProxyJump host 'gatesftp2' not found.\nIt needs to be initialized before starting work.\nInitialize now?",
+"ProxyJump host '${SshConstants.GATEWAY_HOST}' not found.\nIt needs to be initialized before starting work.\nInitialize now?",
                 "Initialize ProxyJump",
                 JOptionPane.YES_NO_OPTION,
                 JOptionPane.QUESTION_MESSAGE
@@ -383,17 +384,17 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
             }
             
             gbc.gridx = 0; gbc.gridy = 0; gbc.gridwidth = 3
-            dialog.add(JLabel("Setup ProxyJump host 'gatesftp2':"), gbc)
+            dialog.add(JLabel("Setup ProxyJump host '${SshConstants.GATEWAY_HOST}':"), gbc)
             
             gbc.gridy = 1; gbc.gridwidth = 1
             dialog.add(JLabel("HostName:"), gbc)
             gbc.gridx = 1; gbc.gridwidth = 2
-            dialog.add(JLabel("23.109.14.108"), gbc)
+            dialog.add(JLabel(SshConstants.GATEWAY_HOSTNAME), gbc)
             
             gbc.gridx = 0; gbc.gridy = 2; gbc.gridwidth = 1
             dialog.add(JLabel("User:"), gbc)
             gbc.gridx = 1; gbc.gridwidth = 2
-            dialog.add(JLabel("gateway"), gbc)
+            dialog.add(JLabel(SshConstants.GATEWAY_USER), gbc)
             
             gbc.gridx = 0; gbc.gridy = 3; gbc.gridwidth = 1
             dialog.add(JLabel("IdentityFile:"), gbc)
@@ -417,7 +418,7 @@ class SshHostsToolWindowFactory : ToolWindowFactory {
                     sshService.addGatewayHost(identityFile)
                     result = true
                     dialog.dispose()
-                    JOptionPane.showMessageDialog(null, "ProxyJump host 'gatesftp2' created successfully!", "Success", JOptionPane.INFORMATION_MESSAGE)
+                    JOptionPane.showMessageDialog(null, "ProxyJump host '${SshConstants.GATEWAY_HOST}' created successfully!", "Success", JOptionPane.INFORMATION_MESSAGE)
                 } catch (e: Exception) {
                     JOptionPane.showMessageDialog(dialog, "Error creating ProxyJump host: ${e.message}", "Error", JOptionPane.ERROR_MESSAGE)
                 }

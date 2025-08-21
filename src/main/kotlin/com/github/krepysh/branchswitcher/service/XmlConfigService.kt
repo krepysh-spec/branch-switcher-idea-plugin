@@ -33,6 +33,9 @@ class XmlConfigService {
             
             val webServersFile = File(ideaDir, "webServers.xml")
             addOrUpdateWebServer(webServersFile, hostName, selectedProject)
+            
+            val deploymentFile = File(ideaDir, "deployment.xml")
+            addOrUpdateDeploymentMapping(deploymentFile, selectedProject)
         }
     }
     
@@ -56,6 +59,11 @@ class XmlConfigService {
             val webServersFile = File(projectDir, ".idea/webServers.xml")
             if (webServersFile.exists()) {
                 removeWebServerFromXml(webServersFile, hostName)
+            }
+            
+            val deploymentFile = File(projectDir, ".idea/deployment.xml")
+            if (deploymentFile.exists()) {
+                removeDeploymentMappingFromXml(deploymentFile, hostName)
             }
         }
     }
@@ -225,6 +233,99 @@ class XmlConfigService {
         val option = doc.createElement("option")
         option.setAttribute("name", "servers")
         component.appendChild(option)
+        
+        return doc
+    }
+    
+    private fun addOrUpdateDeploymentMapping(xmlFile: File, selectedProject: String) {
+        try {
+            val doc = if (xmlFile.exists()) {
+                val factory = DocumentBuilderFactory.newInstance()
+                val builder = factory.newDocumentBuilder()
+                builder.parse(xmlFile)
+            } else {
+                createEmptyDeploymentDocument()
+            }
+            
+            val serverDataElement = doc.getElementsByTagName("serverData").item(0) as Element
+            
+            // Check if paths already exist
+            val existingPaths = doc.getElementsByTagName("paths")
+            var pathsFound = false
+            for (i in 0 until existingPaths.length) {
+                val paths = existingPaths.item(i) as Element
+                if (paths.getAttribute("name") == selectedProject) {
+                    pathsFound = true
+                    break
+                }
+            }
+            
+            if (!pathsFound) {
+                val paths = doc.createElement("paths")
+                paths.setAttribute("name", selectedProject)
+                
+                val serverdata = doc.createElement("serverdata")
+                val mappings = doc.createElement("mappings")
+                val mapping = doc.createElement("mapping")
+                mapping.setAttribute("deploy", "/")
+                mapping.setAttribute("local", "\$PROJECT_DIR\$")
+                mapping.setAttribute("web", "/home/dev/backend")
+                
+                mappings.appendChild(mapping)
+                serverdata.appendChild(mappings)
+                paths.appendChild(serverdata)
+                serverDataElement.appendChild(paths)
+            }
+            
+            saveDocument(doc, xmlFile)
+        } catch (e: Exception) {
+            println("Error creating deployment.xml: ${e.message}")
+        }
+    }
+    
+    private fun removeDeploymentMappingFromXml(xmlFile: File, hostName: String) {
+        try {
+            val factory = DocumentBuilderFactory.newInstance()
+            val builder = factory.newDocumentBuilder()
+            val doc = builder.parse(xmlFile)
+            
+            val pathsElements = doc.getElementsByTagName("paths")
+            for (i in pathsElements.length - 1 downTo 0) {
+                val paths = pathsElements.item(i) as Element
+                if (paths.getAttribute("name") == hostName) {
+                    paths.parentNode.removeChild(paths)
+                }
+            }
+            
+            saveDocument(doc, xmlFile)
+        } catch (e: Exception) {
+            println("Error removing from deployment.xml: ${e.message}")
+        }
+    }
+    
+    private fun createEmptyDeploymentDocument(): Document {
+        val factory = DocumentBuilderFactory.newInstance()
+        val builder = factory.newDocumentBuilder()
+        val doc = builder.newDocument()
+        
+        val project = doc.createElement("project")
+        project.setAttribute("version", "4")
+        doc.appendChild(project)
+        
+        val component = doc.createElement("component")
+        component.setAttribute("name", "PublishConfigData")
+        component.setAttribute("serverName", "")
+        component.setAttribute("remoteFilesAllowedToDisappearOnAutoupload", "false")
+        component.setAttribute("confirmBeforeUploading", "false")
+        project.appendChild(component)
+        
+        val option = doc.createElement("option")
+        option.setAttribute("name", "confirmBeforeUploading")
+        option.setAttribute("value", "false")
+        component.appendChild(option)
+        
+        val serverData = doc.createElement("serverData")
+        component.appendChild(serverData)
         
         return doc
     }

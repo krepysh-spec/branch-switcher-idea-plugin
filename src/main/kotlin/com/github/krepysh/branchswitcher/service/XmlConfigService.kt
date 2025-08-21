@@ -1,5 +1,6 @@
 package com.github.krepysh.branchswitcher.service
 
+import com.intellij.openapi.application.ApplicationManager
 import java.io.File
 import javax.xml.parsers.DocumentBuilderFactory
 import javax.xml.transform.TransformerFactory
@@ -10,38 +11,115 @@ import org.w3c.dom.Element
 
 class XmlConfigService {
     
-    fun createSshConfigForProjects(hostName: String, hostname: String, user: String, port: Int, identityFile: String, selectedProject: String) {
+    private var cachedProjectName: String? = null
+    private var cachedBaseName: String? = null
+    
+    private fun getUniqueConfigName(baseName: String, currentProject: File): String {
+        if (cachedBaseName == baseName && cachedProjectName != null) {
+            return cachedProjectName!!
+        }
         val projectsDir = File(System.getProperty("user.home"), "Projects")
-        if (!projectsDir.exists()) return
+        val allProjects = projectsDir.listFiles()?.filter { it.isDirectory } ?: return baseName
         
-        projectsDir.listFiles()?.filter { it.isDirectory }?.forEach { projectDir ->
-            val ideaDir = File(projectDir, ".idea")
-            if (!ideaDir.exists()) ideaDir.mkdirs()
+        val existingNames = mutableSetOf<String>()
+        
+        allProjects.forEach { project ->
+            if (project.absolutePath == currentProject.absolutePath) return@forEach
+            // Check SSH configs
+            val sshFile = File(project, ".idea/sshConfigs.xml")
+            if (sshFile.exists()) {
+                try {
+                    val factory = DocumentBuilderFactory.newInstance()
+                    val builder = factory.newDocumentBuilder()
+                    val doc = builder.parse(sshFile)
+                    
+                    val configs = doc.getElementsByTagName("sshConfig")
+                    for (i in 0 until configs.length) {
+                        val config = configs.item(i) as Element
+                        existingNames.add(config.getAttribute("customName"))
+                    }
+                } catch (e: Exception) {
+                    // Ignore parsing errors
+                }
+            }
             
-            val sshFile = File(ideaDir, "sshConfigs.xml")
-            addOrUpdateSshConfig(sshFile, hostName, hostname, user, port, identityFile, selectedProject)
+            // Check WebServers configs
+            val webServersFile = File(project, ".idea/webServers.xml")
+            if (webServersFile.exists()) {
+                try {
+                    val factory = DocumentBuilderFactory.newInstance()
+                    val builder = factory.newDocumentBuilder()
+                    val doc = builder.parse(webServersFile)
+                    
+                    val webServers = doc.getElementsByTagName("webServer")
+                    for (i in 0 until webServers.length) {
+                        val webServer = webServers.item(i) as Element
+                        existingNames.add(webServer.getAttribute("name"))
+                    }
+                } catch (e: Exception) {
+                    // Ignore parsing errors
+                }
+            }
+        }
+        
+        var uniqueName = baseName
+        var counter = 2
+        while (existingNames.contains(uniqueName)) {
+            uniqueName = "${baseName}_${counter}"
+            counter++
+        }
+        
+        cachedBaseName = baseName
+        cachedProjectName = uniqueName
+        return uniqueName
+    }
+    
+    fun createSshConfigForProjects(hostName: String, hostname: String, user: String, port: Int, identityFile: String, selectedProject: String) {
+        ApplicationManager.getApplication().executeOnPooledThread {
+            cachedProjectName = null
+            cachedBaseName = null
+            val projectsDir = File(System.getProperty("user.home"), "Projects")
+            if (!projectsDir.exists()) return@executeOnPooledThread
+            
+            projectsDir.listFiles()?.filter { it.isDirectory }?.forEach { projectDir ->
+                val ideaDir = File(projectDir, ".idea")
+                if (!ideaDir.exists()) ideaDir.mkdirs()
+                
+                val sshFile = File(ideaDir, "sshConfigs.xml")
+                val webServersFile = File(ideaDir, "webServers.xml")
+                val deploymentFile = File(ideaDir, "deployment.xml")
+                val uniqueProjectName = if (sshFile.exists() || webServersFile.exists() || deploymentFile.exists()) getUniqueConfigName(selectedProject, projectDir) else selectedProject
+                addOrUpdateSshConfig(sshFile, hostName, hostname, user, port, identityFile, uniqueProjectName)
+            }
         }
     }
     
     fun createDeploymentConfigForProjects(hostName: String, selectedProject: String) {
-        println("Creating deployment config for host: $hostName, project: $selectedProject")
-        val projectsDir = File(System.getProperty("user.home"), "Projects")
-        if (!projectsDir.exists()) {
-            println("Projects directory does not exist")
-            return
-        }
-        
-        projectsDir.listFiles()?.filter { it.isDirectory }?.forEach { projectDir ->
-            println("Processing project directory: ${projectDir.name}")
-            val ideaDir = File(projectDir, ".idea")
-            if (!ideaDir.exists()) ideaDir.mkdirs()
+        ApplicationManager.getApplication().executeOnPooledThread {
+            cachedProjectName = null
+            cachedBaseName = null
+            println("Creating deployment config for host: $hostName, project: $selectedProject")
+            val projectsDir = File(System.getProperty("user.home"), "Projects")
+            if (!projectsDir.exists()) {
+                println("Projects directory does not exist")
+                return@executeOnPooledThread
+            }
             
-            val webServersFile = File(ideaDir, "webServers.xml")
-            addOrUpdateWebServer(webServersFile, hostName, selectedProject)
-            
-            val deploymentFile = File(ideaDir, "deployment.xml")
-            println("Creating deployment file: ${deploymentFile.absolutePath}")
-            addOrUpdateDeploymentMapping(deploymentFile, selectedProject)
+            projectsDir.listFiles()?.filter { it.isDirectory }?.forEach { projectDir ->
+                println("Processing project directory: ${projectDir.name}")
+                val ideaDir = File(projectDir, ".idea")
+                if (!ideaDir.exists()) ideaDir.mkdirs()
+                
+                val sshFile = File(ideaDir, "sshConfigs.xml")
+                val webServersFile = File(ideaDir, "webServers.xml")
+                val deploymentFile = File(ideaDir, "deployment.xml")
+                val uniqueProjectName = if (sshFile.exists() || webServersFile.exists() || deploymentFile.exists()) getUniqueConfigName(selectedProject, projectDir) else selectedProject
+                
+                addOrUpdateWebServer(webServersFile, hostName, uniqueProjectName)
+                
+                println("Creating deployment file: ${deploymentFile.absolutePath}")
+                addOrUpdateDeploymentMapping(deploymentFile, uniqueProjectName)
+            }
         }
     }
     
@@ -169,7 +247,7 @@ class XmlConfigService {
             val configs = doc.getElementsByTagName("sshConfig")
             for (i in configs.length - 1 downTo 0) {
                 val config = configs.item(i) as Element
-                if (config.getAttribute("id") == hostName) {
+                if (config.getAttribute("customName") == hostName || config.getAttribute("id") == hostName) {
                     config.parentNode.removeChild(config)
                 }
             }
